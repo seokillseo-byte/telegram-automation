@@ -1,0 +1,1 @@
+{"name":"@telegram-automation/desktop","version":"0.0.1","private":true,"description":"Telegram Automation Phase 0 spike","author":"Telegram Automation contributors","main":"dist/main.cjs","dependencies":{"telegram":"2.26.22"}}
