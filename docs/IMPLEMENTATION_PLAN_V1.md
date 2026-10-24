@@ -95,7 +95,7 @@ App cần mở, máy có mạng; Windows sleep/đóng ứng dụng sẽ làm ng�
 ## 5. Phase/Task và nghiệm thu
 
 Mỗi phase có PR riêng, cập nhật test guide và ghi PASS/FAIL/BLOCKED kèm bằng chứng.
-Trạng thái hiện tại tất cả task: TODO. Hoàn thành tài liệu không đồng nghĩa phase code đã hoàn thành.
+Phase 0 đang triển khai: xem PHASE0_STATUS.md để biết bằng chứng và các cổng chưa đạt. Phase 1–7: TODO. Hoàn thành tài liệu hoặc CI xanh không đồng nghĩa nghiệm thu kết nối thật đã hoàn thành.
 
 ### Phase 0 — Xác minh nền tảng
 Phụ thuộc: không.
