@@ -1,13 +1,13 @@
-# Nghiên cứu ngành — 0.1.0
+# Nghiên cứu ngành — 0.1.1
 
 ## Phạm vi đã triển khai
 Bản này bổ sung module nghiên cứu vào nền Phase 0 theo yêu cầu mới, đưa một phần chức năng dữ liệu/tìm kiếm của Phase 1/3 lên trước. Không có nghĩa toàn bộ Phase 1–3 đã hoàn tất. Phiên Telegram và appId được giữ để có thể khôi phục phiên cũ.
 
 - Tìm theo từ khóa (mặc định) hoặc tra username chính xác. Hỗ trợ chủ đề có dấu/khoảng trắng khi tìm từ khóa.
-- Một truy vấn do người dùng bấm mỗi lần, request limit vẫn 20. Không tăng quy mô thu thập, không lặp tự động hoặc phân trang giả.
+- Một truy vấn do người dùng bấm mỗi lần, request limit là 100. Không tăng quy mô thu thập, không lặp tự động hoặc phân trang giả.
 - Nguồn: Cá nhân hóa (my_results), Tìm kiếm Telegram (results), Tra chính xác. Một hồ sơ có thể thuộc hai nguồn; nguồn không chứng minh người đó chưa từng tương tác.
 - Phân biệt namespace user/chat/channel để không gộp nhầm ID trùng số. Bot và cá nhân dùng cùng namespace user.
-- Lọc loại, nguồn, có username và username chứa chuỗi. Mặc định chỉ hiện có username.
+- Lọc loại, nguồn, có username và username chứa chuỗi. Mặc định hiện toàn bộ kết quả, kể cả không có username.
 - Hồ sơ có username được ghi quan sát local để so sánh. Kết quả không có username không tự tạo hồ sơ nghiên cứu mới, không được chọn lưu/xuất.
 - Mới / đã thấy / thay đổi dựa trên mọi quan sát trước của cùng tài khoản trên máy. Thay đổi gồm username, tên, loại; không suy ra thay đổi trên toàn Telegram.
 - Chọn hồ sơ để lưu, thêm chủ đề, nhãn, ghi chú. Xóa đã chọn xóa hồ sơ và observation tương ứng; số liệu tổng hợp lịch sử run vẫn giữ.
@@ -19,10 +19,10 @@ Bản này bổ sung module nghiên cứu vào nền Phase 0 theo yêu cầu m�
 
 ## Thử trên Windows
 1. Tải ZIP artifact **Telegram-Industry-Research-Windows-x64** từ run xanh, giải nén.
-2. Đóng ứng dụng cũ. Cài **Telegram-Industry-Research-0.1.0-x64-Setup.exe**. Tên ứng dụng trong Windows có thể vẫn là Telegram Automation Phase 0 để giữ tương thích với nền cũ.
+2. Đóng ứng dụng cũ. Cài **Telegram-Industry-Research-0.1.1-x64-Setup.exe**. Tên ứng dụng trong Windows có thể vẫn là Telegram Automation Phase 0 để giữ tương thích với nền cũ.
 3. Mở → tab **Tài khoản & Kết nối** → **Khôi phục phiên đã lưu**. Không cần nhập API lại nếu phiên hợp lệ.
 4. Sang **Nghiên cứu ngành** → nhập seo → chọn **Tìm theo từ khóa** → Tìm kiếm.
-5. Kiểm tra tổng trả về và số hiển thị: mặc định các dòng không có username bị ẩn. Bỏ lọc để xem chúng, nhưng không chọn lưu/xuất được.
+5. Kiểm tra tổng trả về và số hiển thị: mặc định hiện cả dòng không có username. Bật “Chỉ có username” để lọc; dòng không có username không chọn lưu/xuất được.
 6. Lọc nguồn/loại, chọn một vài hồ sơ có username → **Lưu hồ sơ đã chọn**.
 7. Sang **Hồ sơ đã lưu** → **Ghi chú** → nhập chủ đề SEO, nhãn và ghi chú có dấu → Lưu.
 8. Chọn hồ sơ → **Xuất Excel (.xlsx)** → chọn chỗ lưu. Mở Excel, kiểm tra tên tiếng Việt, ID, nguồn, ghi chú và sheet Thong ke. Thử CSV riêng nếu cần.
@@ -40,3 +40,6 @@ Không dán số điện thoại/OTP/token vào ghi chú. Không dùng danh sác
 - Test IPC: không nhận file path tùy ý, khóa sai, note quá dài hoặc format lạ.
 - Windows smoke dev + đóng gói: React/preload, DPAPI, Telegram worker, SQLite persist và sinh XLSX.
 - Live Telegram/Excel trên máy chủ tài khoản cần nghiệm thu riêng; CI không thay thế bước này.
+
+## Thay đổi 0.1.1
+Theo yêu cầu tăng giới hạn: contacts.Search gửi limit=100 thay vì 20, vẫn chỉ một truy vấn thủ công. Telegram có thể trả ít hơn, không bảo đảm 100 username hoặc kết quả người chưa tương tác. Mặc định hiện tất cả thay vì ẩn các dòng thiếu username; có thống kê nguồn, có/không username và số bị lọc. Nếu nguồn discovery rỗng thì UI báo rõ, không gán nhãn người lạ cho nguồn cá nhân hóa. Không lấy danh sách thành viên nhóm. Chưa merge PR #2 không ngăn chạy bộ cài được build từ nhánh PR.

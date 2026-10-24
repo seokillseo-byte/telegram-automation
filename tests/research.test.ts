@@ -54,10 +54,31 @@ test('search preserves personalized and discovery sources and distinguishes chat
  const channel=new Api.Channel({id:BigInt(22),title:'SEO public',username:'seo_channel',broadcast:true});
  const chat=new Api.Chat({id:BigInt(22),title:'SEO private'});
  let calls=0;
- const fake={invoke:async(request:{className:string;limit?:number})=>{calls++;assert.equal(request.limit,20);return {myResults:[new Api.PeerUser({userId:BigInt(11)}),new Api.PeerChat({chatId:BigInt(22)})],results:[new Api.PeerUser({userId:BigInt(11)}),new Api.PeerChannel({channelId:BigInt(22)})],users:[user],chats:[channel,chat]};}};
+ const fake={invoke:async(request:{className:string;limit?:number})=>{calls++;assert.equal(request.limit,100);return {myResults:[new Api.PeerUser({userId:BigInt(11)}),new Api.PeerChat({chatId:BigInt(22)})],results:[new Api.PeerUser({userId:BigInt(11)}),new Api.PeerChannel({channelId:BigInt(22)})],users:[user],chats:[channel,chat]};}};
  const peers=await search(fake as never,'seo',false);
  assert.equal(calls,1);assert.equal(peers.length,3);
  assert.deepEqual(peers.find(p=>p.id==='11')?.sources,['personalized','discovery']);
  assert.deepEqual(peers.find(p=>p.peerType==='channel')?.sources,['discovery']);
  assert.deepEqual(peers.find(p=>p.peerType==='chat')?.sources,['personalized']);
+});
+
+
+test('default research filters show all 19 rows while username-only filter shows six',async()=>{
+ const {filterResearchPeers,RESEARCH_SEARCH_LIMIT}=await import('../packages/shared/src/research');
+ const rows:ResearchPeer[]=Array.from({length:19},(_,index)=>({...peer,id:String(index+1),key:'user:'+String(index+1),kind:index<6?'user':'group',username:index<6?'seo_'+index:undefined,sources:['personalized'],comparison:'seen',firstSeen:'2026-10-24',lastSeen:'2026-10-24',query:'seo',note:'',tags:'',category:'',saved:false}));
+ assert.equal(RESEARCH_SEARCH_LIMIT,100);
+ assert.equal(filterResearchPeers(rows).length,19);
+ assert.equal(filterResearchPeers(rows,{kind:'all',source:'all',publicOnly:true,contains:''}).length,6);
+ assert.equal(filterResearchPeers(rows,{kind:'group',source:'all',publicOnly:false,contains:''}).length,13);
+ assert.equal(filterResearchPeers(rows,{kind:'all',source:'discovery',publicOnly:false,contains:''}).length,0);
+});
+
+test('one manual search requests 100 and renders every returned peer without extra requests',async()=>{
+ const sdk=createRequire(resolve('apps/desktop/package.json'));const {Api}=sdk('telegram');
+ const {search}=await import('../packages/telegram-user/src');
+ const users=Array.from({length:100},(_,i)=>new Api.User({id:BigInt(i+1),firstName:'Research',username:'research_'+i}));
+ let calls=0;
+ const fake={invoke:async(request:{limit:number})=>{calls++;assert.equal(request.limit,100);return {myResults:[],results:users.map((user:{id:bigint})=>new Api.PeerUser({userId:user.id})),users,chats:[]};}};
+ const results=await search(fake as never,'research',false);
+ assert.equal(calls,1);assert.equal(results.length,100);assert.ok(results.every(p=>p.sources.includes('discovery')));
 });

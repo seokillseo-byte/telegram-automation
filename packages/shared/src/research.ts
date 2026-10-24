@@ -20,3 +20,11 @@ export function parseResearchAction(value:unknown):ResearchAction{
  default:throw Error('INPUT_INVALID');
  }
 }
+
+export const RESEARCH_SEARCH_LIMIT=100;
+export type ResearchFilters={kind:string;source:string;publicOnly:boolean;contains:string};
+export const DEFAULT_RESEARCH_FILTERS:ResearchFilters={kind:'all',source:'all',publicOnly:false,contains:''};
+export function filterResearchPeers(data:ResearchPeer[],filters:ResearchFilters=DEFAULT_RESEARCH_FILTERS):ResearchPeer[]{
+ const contains=filters.contains.replace(/^@/,'').toLowerCase();
+ return data.filter(peer=>(filters.kind==='all'||peer.kind===filters.kind)&&(filters.source==='all'||peer.sources.includes(filters.source as 'personalized'|'discovery'|'exact'))&&(!filters.publicOnly||Boolean(peer.username))&&(!contains||peer.username?.toLowerCase().includes(contains)));
+}
