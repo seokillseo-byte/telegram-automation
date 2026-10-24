@@ -216,3 +216,6 @@ Theo phạm vi được người dùng chấp nhận: bổ sung thống kê nhó
 
 ## Phase 1 implementation — 0.3.0
 Đã triển khai khung 11 màn, cấu hình SQLite, nhật ký sự kiện allowlist, quản lý schema và kiểm tra compiler/test/Windows. Hộp thư/mẫu tin/lịch gửi chưa khả dụng theo phase đã định. Xem PHASE1_FOUNDATION.md để nghiệm thu T01–T02 trước khi coi Phase 1 hoàn tất.
+
+## Thư viện mẫu tin — 0.4.0
+Triển khai riêng phần mẫu tin của P4.4 để dùng offline trong lúc các luồng kết nối/hộp thư tiếp tục theo kế hoạch. CRUD, tìm kiếm, nhân bản, xem trước biến và migration schema 4; chưa có gửi tin hoặc hoàn tất Phase 4. Xem MESSAGE_TEMPLATES_V0.4.md.

@@ -31,3 +31,7 @@ Không commit credential, session hoặc dữ liệu tài khoản thật. Kiểm
 
 ## Phase 1 — 0.3.0
 [Khung ứng dụng và hướng dẫn T01–T02](docs/PHASE1_FOUNDATION.md): menu đầy đủ, tổng quan dữ liệu thật, cài đặt có lưu, nhật ký không chứa bí mật, SQLite schema migration. Hộp thư/mẫu tin/lịch gửi có nhãn chưa khả dụng. Nhánh phase-1-app-foundation.
+
+## Mẫu tin 0.4.0
+
+Thư viện mẫu tin dùng offline: tạo/sửa/nhân bản/tìm/xóa, xem trước biến và lưu SQLite. Chưa có gửi tin. Xem [hướng dẫn và nghiệm thu](docs/MESSAGE_TEMPLATES_V0.4.md).
