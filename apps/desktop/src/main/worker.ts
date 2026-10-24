@@ -1,3 +1,5 @@
+import {ManualSender} from '../../../../packages/telegram-user/src/manual-send';
+const sender=new ManualSender();
 import {subscribeInboxUpdates} from '../../../../packages/telegram-user/src/inbox-updates';
 let unsubscribeInbox:(()=>void)|undefined;
 import {InboxReader} from '../../../../packages/telegram-user/src/inbox';
@@ -23,7 +25,7 @@ port.on('message',async (message)=>{
  try{
   if(message.type==='login'||message.type==='restore'){
    authFailure=undefined;stage='creating_client';emit({state:'connecting',stage});
-   unsubscribeInbox?.();unsubscribeInbox=undefined;inbox.reset();if(client)await client.destroy();
+   sender.reset();unsubscribeInbox?.();unsubscribeInbox=undefined;inbox.reset();if(client)await client.destroy();
    client=makeClient(message.apiId,message.apiHash,message.session??'');
    stage='connecting_transport';emit({state:'connecting',stage});
    await client.connect();
@@ -38,6 +40,9 @@ port.on('message',async (message)=>{
    const me=await client.getMe();
    unsubscribeInbox=subscribeInboxUpdates(client,inbox,update=>port.postMessage({kind:'inbox_update',update}));
    port.postMessage({kind:'session',value:{apiId:message.apiId,apiHash:message.apiHash,session:client.session.save()},identity:identity(me as Api.User)});
+  } else if(message.type==='manual'){
+   try{if(!client)throw Error('NOT_CONNECTED');const reply=message.action.type==='preview'?await sender.preview(client,inbox,message.action,message.attachment):await sender.confirm(client,message.action.id);port.postMessage({kind:'manual',reply});}
+   catch(error){port.postMessage({kind:'manual',reply:{ok:false,error:classifyError(error)}});}
   } else if(message.type==='inbox'){
    try{if(!client||!await client.checkAuthorization())throw Error('NOT_CONNECTED');
     port.postMessage({kind:'inbox',reply:await inbox.read(client,message.action)});
@@ -50,7 +55,7 @@ port.on('message',async (message)=>{
    const groupReport=await analyzeGroup(client,message.target,next=>{stage=next;emit({state:'analyzing_group',stage});});
    stage='group_analysis_complete';emit({state:'group_analysis_complete',stage,groupReport});
   } else if(message.type==='logout'){
-   if(client){await client.invoke(new Api.auth.LogOut());unsubscribeInbox?.();unsubscribeInbox=undefined;inbox.reset();await client.destroy();client=undefined;}
+   if(client){await client.invoke(new Api.auth.LogOut());sender.reset();unsubscribeInbox?.();unsubscribeInbox=undefined;inbox.reset();await client.destroy();client=undefined;}
    port.postMessage({kind:'logged_out'});
   }
  }catch(error){emit({state:'error',stage,error:classifyError(authFailure??error)});authFailure=undefined;}finally{busy=false;}

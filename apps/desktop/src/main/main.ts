@@ -1,3 +1,5 @@
+import {parseManualAction,type ManualReply,type AttachmentData} from '../../../../packages/shared/src/manual-send';
+import {readSendAttachment} from './send-attachment';
 import {parseInboxAction,type InboxReply} from '../../../../packages/shared/src/inbox';
 import {parseAppAction,type AppReply} from '../../../../packages/shared/src/app-state';
 import {app,BrowserWindow,ipcMain,safeStorage,dialog} from 'electron';
@@ -26,6 +28,9 @@ let userIdentity:Identity|undefined;
 let inboxOnline=true;
 let exporting=false;
 let busy=false;
+let manualFile:AttachmentData|undefined;
+let pendingManual:((reply:ManualReply)=>void)|undefined;
+let manualDispatch=false;
 let pendingInbox:((reply:InboxReply)=>void)|undefined;
 let generation=0;
 let encryption=false;
@@ -34,8 +39,8 @@ const page=pathToFileURL(join(__dirname,'index.html')).href;
 let lastEvent='';
 function emit(status:Status){if(status.state!==lastEvent){try{research?.addEvent(status.state);}catch{/* logging must not interrupt Telegram */}lastEvent=status.state;}latest={...status,encryption,userIdentity,userConnected:Boolean(userIdentity&&worker),inboxOnline:userIdentity?inboxOnline:undefined};if(win&&!win.isDestroyed())win.webContents.send('spike:status',latest);}
 function stopWatch(){clearTimeout(watchdog);watchdog=undefined;}
-async function stopWorker(keepBusy=false,inboxError='CANCELLED'){stopWatch();if(pendingInbox){pendingInbox({ok:false,error:classifyError(Error(inboxError))});pendingInbox=undefined;}inboxOnline=false;const previous=worker;worker=undefined;userIdentity=undefined;currentResults=[];if(!keepBusy)busy=false;if(previous)await previous.terminate();}
-function startWatch(){stopWatch();watchdog=setTimeout(()=>{void stopWorker(false,'TIMEOUT').then(()=>emit({state:'error',error:classifyError(Error('TIMEOUT'))}));},90000);}
+async function stopWorker(keepBusy=false,inboxError='CANCELLED'){generation++;stopWatch();manualFile=undefined;if(pendingManual){pendingManual({ok:false,error:classifyError(Error(inboxError)),uncertain:manualDispatch});pendingManual=undefined;}manualDispatch=false;if(pendingInbox){pendingInbox({ok:false,error:classifyError(Error(inboxError))});pendingInbox=undefined;}inboxOnline=false;const previous=worker;worker=undefined;userIdentity=undefined;currentResults=[];if(!keepBusy)busy=false;if(previous)await previous.terminate();}
+function startWatch(milliseconds=90000){stopWatch();watchdog=setTimeout(()=>{void stopWorker(false,'TIMEOUT').then(()=>emit({state:'error',error:classifyError(Error('TIMEOUT'))}));},milliseconds);}
 function getWorker(){
  if(worker)return worker;
  const current=new Worker(join(__dirname,'worker.cjs'));worker=current;
@@ -43,6 +48,7 @@ function getWorker(){
   if(worker!==current)return;
   if(message.kind==='inbox_update'){if(!userIdentity)return;if(message.update.type==='connection'){inboxOnline=message.update.connected;latest={...latest,inboxOnline};win.webContents.send('spike:status',latest);}win.webContents.send('inbox:update',message.update);return;}
   stopWatch();
+  if(message.kind==='manual'){const resolve=pendingManual;pendingManual=undefined;manualDispatch=false;busy=false;if(!message.reply.ok&&['NOT_CONNECTED','AUTH_KEY_UNREGISTERED','SESSION_REVOKED','SESSION_EXPIRED'].includes(message.reply.error.code))await stopWorker(false,message.reply.error.code);emit(message.reply.ok?{state:'manual_ready'}:{state:'error',error:message.reply.error});resolve?.(message.reply);return;}
   if(message.kind==='inbox'){
    if(!message.reply.ok&&['NOT_CONNECTED','AUTH_KEY_UNREGISTERED','SESSION_REVOKED','SESSION_EXPIRED'].includes(message.reply.error.code)){await stopWorker(false,message.reply.error.code);emit({state:'error',error:message.reply.error});return;}
    const resolve=pendingInbox;pendingInbox=undefined;busy=false;emit(message.reply.ok?{state:'inbox_ready'}:{state:'error',error:message.reply.error});resolve?.(message.reply);return;
@@ -62,7 +68,7 @@ function getWorker(){
    emit(message.status);
   } else if(message.kind==='session'){
    try{await vault.save(message.value);if(worker!==current)return;busy=false;inboxOnline=true;userIdentity=message.identity;researchScope=message.identity.id;research.setAccount(researchScope);emit({state:'connected',identity:message.identity});}catch(error){await stopWorker();emit({state:'error',error:classifyError(error)});}
-  } else if(message.kind==='logged_out'){await vault.clear();userIdentity=undefined;currentResults=[];busy=false;emit({state:'disconnected'});}
+  } else if(message.kind==='logged_out'){await vault.clear();manualFile=undefined;userIdentity=undefined;currentResults=[];busy=false;emit({state:'disconnected'});}
  });
  current.on('error',error=>{const mapped=classifyError(error);void stopWorker(false,mapped.code).then(()=>emit({state:'error',stage:'starting_worker',error:mapped.code==='TELEGRAM_ERROR'?classifyError(Error('WORKER_FAILED')):mapped}));});
  current.on('exit',()=>{if(worker===current)void stopWorker(false,'WORKER_EXIT').then(()=>emit({state:'error',error:classifyError(Error('WORKER_EXIT'))}));});
@@ -79,6 +85,26 @@ else app.whenReady().then(async()=>{
  win.webContents.on('will-navigate',(event,url)=>{if(url!==page)event.preventDefault();});
  win.webContents.session.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
  win.webContents.session.webRequest.onBeforeRequest((details,callback)=>callback({cancel:!details.url.startsWith(pathToFileURL(__dirname).href+'/')}));
+ ipcMain.handle('manual:action',async(event,input):Promise<ManualReply>=>{
+  if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
+  let ownBusy=false;const epoch=generation;
+  try{
+   const action=parseManualAction(input);
+   if(!worker||!userIdentity)throw Error('NOT_CONNECTED');if(busy)throw Error('BUSY');if(!inboxOnline)throw Error('NETWORK_TIMEOUT');
+   busy=true;ownBusy=true;
+   if(action.type==='clearFile'){manualFile=undefined;busy=false;return {ok:true,cancelled:true};}
+   emit({state:action.type==='confirm'?'manual_sending':'manual_preparing'});
+   if(action.type==='pickFile'){
+    const chosen=await dialog.showOpenDialog(win,{title:action.kind==='photo'?'Chọn ảnh JPEG/PNG (tối đa 10 MB)':'Chọn tài liệu (tối đa 20 MB)',properties:['openFile'],filters:action.kind==='photo'?[{name:'Ảnh',extensions:['jpg','jpeg','png']}]:[{name:'Tệp',extensions:['*']}]});
+    if(epoch!==generation)throw Error('CANCELLED');if(chosen.canceled||!chosen.filePaths[0]){busy=false;emit({state:'manual_ready'});return {ok:true,cancelled:true};}
+    const selected=await readSendAttachment(chosen.filePaths[0],action.kind);if(epoch!==generation)throw Error('CANCELLED');manualFile=selected;
+    busy=false;emit({state:'manual_ready'});const {bytes:_,...attachment}=selected;return {ok:true,attachment};
+   }
+   if(action.type==='preview'&&action.fileId&&manualFile?.id!==action.fileId)throw Error('SEND_FILE_EXPIRED');
+   manualDispatch=action.type==='confirm';startWatch(action.type==='confirm'?180000:90000);
+   return await new Promise<ManualReply>(resolve=>{pendingManual=resolve;try{worker!.postMessage({type:'manual',action,attachment:action.type==='preview'&&action.fileId?manualFile:undefined});}catch(error){pendingManual=undefined;manualDispatch=false;busy=false;stopWatch();emit({state:'error',error:classifyError(error)});resolve({ok:false,error:classifyError(error)});}});
+  }catch(error){if(ownBusy&&epoch===generation){busy=false;emit({state:'error',error:classifyError(error)});}return {ok:false,error:classifyError(error)};}
+ });
  ipcMain.handle('inbox:action',async(event,input):Promise<InboxReply>=>{
   if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
   try{
@@ -199,7 +225,7 @@ else app.whenReady().then(async()=>{
    const inboxOk=await win.webContents.executeJavaScript(`(async()=>{
     document.querySelector('nav button[data-page="inbox"]').click();await new Promise(resolve=>setTimeout(resolve,150));
     if(!document.querySelector('[data-testid="inbox-disconnected"]')||!document.querySelector('[data-testid="inbox-refresh"]').disabled||typeof window.spike.inbox!=='function')return false;
-    const disconnected=await window.spike.inbox({type:'dialogs'}),invalid=await window.spike.inbox({type:'send',text:'must not send'});
+    const disconnected=await window.spike.inbox({type:'dialogs'}),invalid=await window.spike.inbox({type:'send',text:'must not send'}),manual=await window.spike.manual({type:'preview',target:{kind:'self'},text:'must not send'});if(manual.ok||manual.error.code!=='NOT_CONNECTED'||!document.querySelector('[data-testid="send-preview"]').disabled)return false;
     return !disconnected.ok&&disconnected.error.code==='NOT_CONNECTED'&&!invalid.ok&&invalid.error.code==='INPUT_INVALID';
    })()`);
    if(!inboxOk)throw Error('SMOKE_FAILED');console.log('INBOX_DISCONNECTED_IPC_PASS');
@@ -226,6 +252,20 @@ else app.whenReady().then(async()=>{
    if(!await win.webContents.executeJavaScript(`document.querySelectorAll('.inbox-message').length===0`))throw Error('SMOKE_FAILED');
    win.webContents.send('spike:status',fixtureStatus);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,500))`);
    if(fixtureReads!==beforeReconnect+2||!await win.webContents.executeJavaScript(`document.querySelector('.inbox-message')?.textContent.includes('Đã sửa <script>')`))throw Error('SMOKE_FAILED');console.log('INBOX_RECONNECT_REFRESH_PASS');
+   let fixtureManualSends=0,fixtureManualToken=false,fixtureManualUncertain=false;
+   ipcMain.removeHandler('manual:action');ipcMain.handle('manual:action',(_event,input)=>{
+    const action=parseManualAction(input);
+    if(action.type==='preview'){fixtureManualToken=true;return {ok:true,preview:{id:'00000000-0000-4000-8000-000000000007',recipient:fixtureStatus.userIdentity,text:action.text,expiresAt:new Date(Date.now()+300000).toISOString()}};}
+    if(action.type==='confirm'&&fixtureManualToken){fixtureManualToken=false;fixtureManualSends++;return fixtureManualUncertain?{ok:false,error:classifyError(Error('TIMEOUT')),uncertain:true}:{ok:true,sent:{id:77,recipient:fixtureStatus.userIdentity}};}
+    return {ok:false,error:classifyError(Error('SEND_PREVIEW_EXPIRED'))};
+   });
+   const composerPreview=await win.webContents.executeJavaScript(`(async()=>{const input=document.querySelector('[data-testid="send-text"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Tin thử **nguyên văn**');input.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,100));document.querySelector('[data-testid="send-preview"]').click();await new Promise(resolve=>setTimeout(resolve,150));return document.querySelector('[data-testid="send-preview-panel"]')?.textContent.includes('Tin thử **nguyên văn**');})()`);
+   if(!composerPreview||fixtureManualSends!==0)throw Error('SMOKE_FAILED');
+   await win.webContents.executeJavaScript(`(()=>{const button=document.querySelector('[data-testid="send-confirm"]');button.click();button.click();})()`);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,150))`);
+   if(Number(fixtureManualSends)!==1||!await win.webContents.executeJavaScript(`document.querySelector('[data-testid="send-text"]').value===''`))throw Error('SMOKE_FAILED');console.log('MANUAL_COMPOSER_PREVIEW_CONFIRM_PASS');
+   fixtureManualUncertain=true;
+   await win.webContents.executeJavaScript(`(async()=>{const input=document.querySelector('[data-testid="send-text"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Giữ bản soạn khi chưa rõ kết quả');input.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,100));document.querySelector('[data-testid="send-preview"]').click();await new Promise(resolve=>setTimeout(resolve,100));document.querySelector('[data-testid="send-confirm"]').click();await new Promise(resolve=>setTimeout(resolve,150));})()`);
+   if(Number(fixtureManualSends)!==2||!await win.webContents.executeJavaScript(`document.querySelector('[data-testid="send-text"]').value==='Giữ bản soạn khi chưa rõ kết quả'&&document.querySelector('[data-testid="send-preview"]').disabled`))throw Error('SMOKE_FAILED');console.log('MANUAL_UNCERTAIN_DRAFT_PASS');
    win.webContents.send('spike:status',{state:'disconnected',userConnected:false});
 
    const templatesOk=await win.webContents.executeJavaScript(`(async()=>{
