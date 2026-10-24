@@ -231,3 +231,6 @@ Gửi thủ công một người nhận: text, một ảnh/tài liệu; xem trư
 
 ## P4.4 — 0.8.0
 Reply tin cụ thể trong hội thoại đã tải; gắn đúng peer/ID, preview/confirm kiểm tra lại tin gốc. Đưa mẫu đã lưu và biến vào Composer, giữ mẫu gốc và quy tắc xử lý lỗi của 0.7. Xem REPLY_TEMPLATES_V0.8.md. P4.5 và nghiệm thu gửi thật còn trước Phase 5.
+
+## P4.5 — 0.9.0
+Bảng capability theo người nhận/loại nội dung, kiểm tra lại trước dispatch, lỗi tiếng Việt có mã/hướng xử lý và chặn gửi thủ công trong FloodWait đã ghi nhận. Không thêm queue/lịch. Xem SEND_RIGHTS_V0.9.md; Phase 4 còn cần T08–T09 bằng tài khoản thật trước nghiệm thu.

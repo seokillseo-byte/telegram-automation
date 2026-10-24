@@ -51,3 +51,7 @@ Saved Messages, hội thoại hoặc username chính xác; text, ảnh/tài li�
 ## Reply và mẫu tin P4.4 — 0.8.0
 
 Trả lời tin đã tải trong đúng hội thoại; dùng mẫu đã lưu và điền biến trong Composer. Vẫn phải preview/confirm; kiểm tra tin gốc xóa/sửa trước dispatch. Xem [hướng dẫn nghiệm thu](docs/REPLY_TEMPLATES_V0.8.md).
+
+## Quyền và lỗi gửi P4.5 — 0.9.0
+
+Kiểm tra quyền theo người nhận và loại nội dung, giữ trạng thái chưa xác định khi thiếu dữ liệu; mã/hướng xử lý lỗi và FloodWait đếm ngược không tự retry. Xem [hướng dẫn nghiệm thu](docs/SEND_RIGHTS_V0.9.md).
