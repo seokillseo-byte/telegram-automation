@@ -1,5 +1,8 @@
 import {ManualSender} from '../../../../packages/telegram-user/src/manual-send';
-const sender=new ManualSender();
+import {SendPolicyStore} from './send-policy-store';
+import {workerData} from 'node:worker_threads';
+let policy:SendPolicyStore|undefined;if(workerData?.policyFile)policy=new SendPolicyStore(workerData.policyFile,true);
+const sender=new ManualSender((recipient,purpose)=>{if(!policy)throw Error('POLICY_UNAVAILABLE');policy.assertAllowed(ownAccount,recipient,purpose);});
 import {subscribeInboxUpdates} from '../../../../packages/telegram-user/src/inbox-updates';
 let unsubscribeInbox:(()=>void)|undefined;
 import {InboxReader} from '../../../../packages/telegram-user/src/inbox';

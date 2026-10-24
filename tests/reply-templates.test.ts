@@ -24,21 +24,21 @@ test('reply input accepts only a bounded message ID in a specific loaded dialog'
 });
 
 test('reply preview does not send and confirm binds text reply to its peer and original message ID',async()=>{
- const {reader,fake,stats}=await fixture(),sender=new ManualSender();assert.equal(reader.canReply('user:9',7),true);assert.equal(reader.canReply('channel:9',7),false);assert.equal(reader.canReply('user:9',8),false);
+ const {reader,fake,stats}=await fixture(),sender=new ManualSender(()=>{});assert.equal(reader.canReply('user:9',7),true);assert.equal(reader.canReply('channel:9',7),false);assert.equal(reader.canReply('user:9',8),false);
  const preview=await sender.preview(fake as never,reader,action);assert.ok(preview.ok&&preview.preview?.reply?.id===7);assert.ok(preview.ok&&preview.preview?.reply?.text==='Tin cần trả lời');assert.equal(stats().sends,0);
  const result=await sender.confirm(fake as never,id(preview));assert.ok(result.ok&&result.sent?.replyTo===7);assert.deepEqual(stats(),{sends:1,rechecks:2,lastReply:7});await assert.rejects(sender.confirm(fake as never,id(preview)),/SEND_PREVIEW_EXPIRED/);
 });
 
 test('photo/document replies retain replyTo through upload and recheck before media dispatch',async()=>{
- for(const kind of ['photo','document'] as const){const {reader,fake,stats}=await fixture(),sender=new ManualSender();const file:AttachmentData={id:'00000000-0000-4000-8000-000000000001',kind,name:kind==='photo'?'test.png':'test.txt',size:3,bytes:new Uint8Array([1,2,3])};
+ for(const kind of ['photo','document'] as const){const {reader,fake,stats}=await fixture(),sender=new ManualSender(()=>{});const file:AttachmentData={id:'00000000-0000-4000-8000-000000000001',kind,name:kind==='photo'?'test.png':'test.txt',size:3,bytes:new Uint8Array([1,2,3])};
  const preview=await sender.preview(fake as never,reader,{...action,fileId:file.id},file);const sent=await sender.confirm(fake as never,id(preview));assert.ok(sent.ok&&sent.sent?.replyTo===7);assert.deepEqual(stats(),{sends:1,rechecks:3,lastReply:7});}
 });
 
 test('deleted, changed or wrong-peer originals abort before dispatch without falling back to a normal message',async()=>{
- for(const variant of ['deleted','changed','wrong_peer']){const {reader,fake,setMessage,stats}=await fixture(),sender=new ManualSender();const preview=await sender.preview(fake as never,reader,action);
+ for(const variant of ['deleted','changed','wrong_peer']){const {reader,fake,setMessage,stats}=await fixture(),sender=new ManualSender(()=>{});const preview=await sender.preview(fake as never,reader,action);
  setMessage(variant==='deleted'?new Api.MessageEmpty({id:7}):new Api.Message({id:7,peerId:variant==='wrong_peer'?new Api.PeerChannel({channelId:BigInt(9)}):peer,date:1700000000,message:'Đã thay đổi'}));
  const result=await sender.confirm(fake as never,id(preview));assert.ok(!result.ok&&!result.uncertain);if(!result.ok)assert.equal(result.error.code,variant==='changed'?'SEND_REPLY_CHANGED':'SEND_REPLY_UNAVAILABLE');assert.equal(stats().sends,0);}
- const {reader,fake,stats}=await fixture(),sender=new ManualSender();reader.update(new Api.UpdateDeleteMessages({messages:[7],pts:1,ptsCount:1}));assert.equal(reader.canReply('user:9',7),false);await assert.rejects(sender.preview(fake as never,reader,action),/SEND_REPLY_UNAVAILABLE/);assert.equal(stats().sends,0);
+ const {reader,fake,stats}=await fixture(),sender=new ManualSender(()=>{});reader.update(new Api.UpdateDeleteMessages({messages:[7],pts:1,ptsCount:1}));assert.equal(reader.canReply('user:9',7),false);await assert.rejects(sender.preview(fake as never,reader,action),/SEND_REPLY_UNAVAILABLE/);assert.equal(stats().sends,0);
 });
 
 test('composer template expansion requires all values, preserves literals and rejects text/caption overflow',()=>{

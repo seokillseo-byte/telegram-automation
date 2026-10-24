@@ -1,3 +1,4 @@
+import {sendPurpose,type SendPurpose} from './send-policy';
 import {scheduleTime} from './queue';
 import type {Failure,Identity} from './protocol';
 export const DOCUMENT_MAX=20*1024*1024,PHOTO_MAX=10*1024*1024;
@@ -8,8 +9,8 @@ export type SendCapability={state:'allowed'|'blocked'|'unknown';reason:string;co
 export type SendCapabilities={recipient:Identity;checkedAt:string;text:SendCapability;photo:SendCapability;document:SendCapability;notes:string[]};
 export type ReplyInfo={id:number;text:string;media?:string};
 export type ComposerReply={key:string;id:number;text:string;available:boolean;token:number};
-export type SendPreview={id:string;recipient:Identity;text:string;attachment?:AttachmentInfo;reply?:ReplyInfo;capabilities?:SendCapabilities;expiresAt:string};
-export type ManualAction={type:'schedule';id:string;dueAt:string;zone:string}|{type:'capabilities';target:SendTarget}|{type:'pickFile';kind:'photo'|'document'}|{type:'clearFile'}|{type:'preview';target:SendTarget;text:string;fileId?:string;replyTo?:number}|{type:'confirm';id:string};
+export type SendPreview={id:string;recipient:Identity;text:string;attachment?:AttachmentInfo;reply?:ReplyInfo;capabilities?:SendCapabilities;expiresAt:string;purpose?:SendPurpose};
+export type ManualAction={type:'schedule';id:string;dueAt:string;zone:string}|{type:'capabilities';target:SendTarget}|{type:'pickFile';kind:'photo'|'document'}|{type:'clearFile'}|{type:'preview';purpose?:SendPurpose;target:SendTarget;text:string;fileId?:string;replyTo?:number}|{type:'confirm';id:string};
 export type ManualReply={ok:true;scheduled?:{id:string;dueAt:string;zone:string};capabilities?:SendCapabilities;attachment?:AttachmentInfo;preview?:SendPreview;sent?:{id:number;recipient:Identity;replyTo?:number};cancelled?:boolean}|{ok:false;error:Failure;uncertain?:boolean;capabilities?:SendCapabilities};
 export function sendId(value:unknown):string{if(typeof value!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))throw Error('INPUT_INVALID');return value;}
 export function parseSendTarget(value:unknown):SendTarget{
@@ -28,14 +29,14 @@ export function parseManualAction(value:unknown):ManualAction{
  if(v.type==='pickFile'){only(['type','kind']);if(v.kind!=='photo'&&v.kind!=='document')throw Error('INPUT_INVALID');return {type:v.type,kind:v.kind};}
  if(v.type==='clearFile'){only(['type']);return {type:v.type};}
  if(v.type==='confirm'){only(['type','id']);return {type:v.type,id:sendId(v.id)};}
- if(v.type!=='preview')throw Error('INPUT_INVALID');only(['type','target','text','fileId','replyTo']);
+ if(v.type!=='preview')throw Error('INPUT_INVALID');only(['type','target','text','fileId','replyTo','purpose']);
  if(typeof v.text!=='string'||v.text.length>4096||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v.text)||!v.target||typeof v.target!=='object')throw Error('INPUT_INVALID');
  const parsed=parseSendTarget(v.target);
  const replyTo=v.replyTo===undefined?undefined:Number(v.replyTo);
  if(v.replyTo!==undefined&&(typeof v.replyTo!=='number'||!Number.isSafeInteger(v.replyTo)||v.replyTo<=0||v.replyTo>2147483647||parsed.kind!=='dialog'))throw Error('INPUT_INVALID');
  const fileId=v.fileId===undefined?undefined:sendId(v.fileId);
  if(!fileId&&!v.text.trim()||fileId&&v.text.length>1024)throw Error('INPUT_INVALID');
- return {type:'preview',target:parsed,text:v.text,fileId,replyTo};
+ return {type:'preview',target:parsed,text:v.text,fileId,replyTo,purpose:sendPurpose(v.purpose??'personal')};
 }
 
 export function sendTargetKey(target:SendTarget):string{return target.kind==='self'?'self':target.kind==='dialog'?target.key:'username:'+target.username.trim().replace(/^@/,'').toLowerCase();}

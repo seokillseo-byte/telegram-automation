@@ -5,7 +5,7 @@ import {classifyError} from '../../../../packages/shared/src/protocol';
 import type {ManualReply} from '../../../../packages/shared/src/manual-send';
 import type {QueueStore} from './queue-store';
 type Context={accountId?:string;connected:boolean;online:boolean;suspended:boolean;busy:boolean};
-type Hooks={store:()=>QueueStore;context:()=>Context;decrypt:(bytes:Buffer)=>Promise<ScheduledPayload>;send:(id:string,payload:ScheduledPayload,expiresAt:number,runId:string)=>void;lock:(busy:boolean)=>void;terminate:(code:string)=>void;changed:()=>void;error:(error:unknown)=>void};
+type Hooks={store:()=>QueueStore;context:()=>Context;authorize:(payload:ScheduledPayload)=>void;decrypt:(bytes:Buffer)=>Promise<ScheduledPayload>;send:(id:string,payload:ScheduledPayload,expiresAt:number,runId:string)=>void;lock:(busy:boolean)=>void;terminate:(code:string)=>void;changed:()=>void;error:(error:unknown)=>void};
 type Flight={job:QueueJob;dispatched:boolean;runId:string};
 // Main-process coordinator: invalidate the flight before terminating the worker.
 export class QueueRunner{
@@ -23,6 +23,7 @@ export class QueueRunner{
   try{this.hooks.store().interrupt(flight.job.accountId,flight.job.id,flight.dispatched,code);this.hooks.changed();}catch(error){this.hooks.error(error);}finally{this.hooks.lock(false);if(terminate&&flight.dispatched)this.hooks.terminate(code);}
  }
  boundary(code:string){this.interrupt(code);try{this.hooks.store().overdue(this.now(),0,code);}catch(error){this.hooks.error(error);}}
+ policyChanged(account:string,recipient:{id:string;peerType:string},marketingOnly:boolean,code:string){const f=this.flight;if(!f||f.job.accountId!==account||f.job.recipient.id!==recipient.id||f.job.recipient.peerType!==recipient.peerType||marketingOnly&&(f.job.purpose??'personal')!=='marketing')return;this.interrupt(code);}
  resetClock(){this.wall=this.now();this.mono=this.monotonic();}
  async tick(){
   const now=this.now(),mono=this.monotonic(),elapsed=now-this.wall,drift=elapsed-(mono-this.mono);this.wall=now;this.mono=mono;
@@ -40,8 +41,8 @@ export class QueueRunner{
     const current=this.hooks.context(),expiresAt=Date.parse(job.nextAttemptAt??job.dueAt)+QUEUE_GRACE_MS;
     if(!this.ready(current)||current.accountId!==job.accountId){this.interrupt('QUEUE_CONNECTION_LOST');return;}
     if(this.now()>expiresAt){this.interrupt('QUEUE_DISPATCH_EXPIRED');return;}
-    if(payload.accountId!==job.accountId||payload.recipient.id!==job.recipient.id||payload.recipient.peerType!==job.recipient.peerType)throw Error('QUEUE_PAYLOAD_INVALID');
-    flight.dispatched=true;this.hooks.send(job.id,payload,expiresAt,flight.runId);
+    if(payload.accountId!==job.accountId||payload.recipient.id!==job.recipient.id||payload.recipient.peerType!==job.recipient.peerType||payload.purpose!==(job.purpose??'personal'))throw Error('QUEUE_PAYLOAD_INVALID');
+    this.hooks.authorize(payload);flight.dispatched=true;this.hooks.send(job.id,payload,expiresAt,flight.runId);
    }catch(error){if(this.flight===flight){try{this.hooks.store().finish(job.accountId,job.id,flight.dispatched?'uncertain':'failed',classifyError(error).code);}finally{this.release();}this.hooks.error(error);}}
   }catch(error){this.hooks.error(error);}
  }

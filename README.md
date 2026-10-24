@@ -65,3 +65,6 @@ Bước đầu Phase 5: xác nhận lịch từ preview, lưu SQLite với paylo
 
 ## P5.4 · Phục hồi hàng đợi · 0.12.0
 [Hướng dẫn và test](docs/QUEUE_RECOVERY_V0.12.md): review sau crash/sleep/mất kết nối, vô hiệu hóa lượt cũ và chặn lệnh quá hạn, bộ lọc/số đếm cần kiểm tra. Không tự gửi bù hay retry uncertain. Build nhánh `queue-recovery-v0.12`, tiếp tục schema 6.
+
+## P5.5 · Đồng ý & chặn gửi · 0.13.0
+[Hướng dẫn và test](docs/SEND_CONSENT_V0.13.md): Danh bạ ghi nhận nguồn đồng ý marketing, rút đồng ý và chặn mọi tin. Kiểm tra khi tạo lịch và trước mỗi lượt gửi, bỏ chặn không phục hồi consent. Văn bản một người nhận, không gửi chiến dịch. Build nhánh `send-consent-v0.13`; schema 7, không hạ về 0.12 hoặc cũ hơn.

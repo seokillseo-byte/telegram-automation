@@ -1,3 +1,4 @@
+import {PURPOSE_LABELS} from '../../../../packages/shared/src/send-policy';
 import {useContext,useEffect,useRef,useState} from 'react';
 import {PreferencesContext,useDateFormatter} from './preferences';
 import {JOB_LABELS,localScheduleToUtc,queueRecoveryHelp,utcToScheduleLocal,type QueueAction,type QueueJob,type QueueReply} from '../../../../packages/shared/src/queue';
@@ -22,12 +23,12 @@ export function Schedule({request,accountId}:{accountId?:string;request:(action:
  },[request,accountId,reviewOnly]);
  return <><section><h2>Lịch gửi văn bản một lần</h2>
   <p>Lịch chạy khi app mở, có mạng và đúng tài khoản đã kết nối. Nếu kết nối bị dừng trong lúc thực thi lịch, hãy Khôi phục phiên trong Tài khoản trước khi tiếp tục.</p>
-  <p>Lịch lỡ giờ cần kiểm tra, không tự gửi bù. “Chưa rõ kết quả” không tự gửi lại; kiểm tra hội thoại Telegram trước khi tạo lịch khác. Chưa có lịch marketing, tệp hoặc reply.</p>
+  <p>Lịch lỡ giờ cần kiểm tra, không tự gửi bù. “Chưa rõ kết quả” không tự gửi lại; kiểm tra hội thoại Telegram trước khi tạo lịch khác. Lịch marketing cần đồng ý còn hiệu lực trước mỗi lần gửi; danh sách chặn áp dụng mọi mục đích. Chưa có lịch tệp hoặc reply.</p>
   <div data-testid="queue-recovery-summary" role="status"><strong>Cần kiểm tra: {summary.needsReview} lịch quá hạn/gián đoạn · {summary.uncertain} lịch chưa rõ kết quả.</strong><p>Các số đếm thuộc tài khoản đang xem, bao gồm bản ghi ngoài 200 dòng hiện tại.</p></div>
   <div className="actions"><button data-testid="queue-review-filter" className={reviewOnly?'':'secondary'} disabled={working} aria-pressed={reviewOnly} onClick={()=>setReviewOnly(value=>!value)}>{reviewOnly?'Hiện tất cả lịch':'Chỉ hiện lịch cần kiểm tra'}</button><button data-testid="queue-refresh" disabled={working} onClick={()=>void act({type:'list',reviewOnly})}>Làm mới lịch</button></div>
   {notice&&<p role="status">{notice}</p>}
   <div className="table-wrap"><table><thead><tr><th>Người nhận</th><th>Giờ hẹn · {settings.timeZone}</th><th>Trạng thái</th><th>Kết quả / phục hồi</th><th>Thao tác</th></tr></thead><tbody>{jobs.filter(job=>!accountId||job.accountId===accountId).map(job=><tr key={job.id} data-job-state={job.state} data-job-id={job.id}>
-   <td>{job.recipient.name}<br/>ID {job.recipient.id}</td><td>{date(job.dueAt)}<br/><small>Múi giờ khi tạo: {job.zone}</small></td>
+   <td>{job.recipient.name}<br/>ID {job.recipient.id}<br/><small>{PURPOSE_LABELS[job.purpose??'personal']}</small></td><td>{date(job.dueAt)}<br/><small>Múi giờ khi tạo: {job.zone}</small></td>
    <td>{JOB_LABELS[job.state]}<br/><small>Lần thử: {job.attempts}/3{job.nextAttemptAt?' · Mốc thử lại: '+date(job.nextAttemptAt):''}</small></td>
    <td>{job.remoteId?'Tin #'+job.remoteId:job.errorCode??'—'}{attention(job)&&<p data-testid="queue-recovery-help">{queueRecoveryHelp(job)}</p>}</td>
    <td><button className="secondary" disabled={working} onClick={()=>void act({type:'detail',id:job.id})}>Xem nội dung</button>

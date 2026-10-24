@@ -20,23 +20,23 @@ test('manual send accepts a single explicit target and rejects paths, batches, e
 });
 
 test('preview does not send; confirm pins immutable peer/content and consumes token before await',async()=>{
- const sender=new ManualSender(),{fake,calls}=fixture();const id=previewId(await sender.preview(fake as never,new InboxReader(),input));assert.deepEqual(calls,['resolve']);
+ const sender=new ManualSender(()=>{}),{fake,calls}=fixture();const id=previewId(await sender.preview(fake as never,new InboxReader(),input));assert.deepEqual(calls,['resolve']);
  const one=sender.confirm(fake as never,id);await assert.rejects(sender.confirm(fake as never,id),/SEND_PREVIEW_EXPIRED/);const reply=await one;assert.ok(reply.ok&&reply.sent?.id===7);assert.equal(calls.filter(c=>c==='sendMessage').length,1);
  await assert.rejects(sender.confirm(fake as never,id),/SEND_PREVIEW_EXPIRED/);sender.reset();await assert.rejects(sender.confirm(fake as never,id),/SEND_PREVIEW_EXPIRED/);
 });
 
 test('permissions are checked again at confirm and username changes cannot redirect an existing preview',async()=>{
- const sender=new ManualSender(),{fake,calls,setEntity}=fixture();const id=previewId(await sender.preview(fake as never,new InboxReader(),input));setEntity(new Api.User({id:BigInt(999),firstName:'Changed',accessHash:BigInt(4)}));const reply=await sender.confirm(fake as never,id);assert.ok(!reply.ok&&reply.error.code==='SEND_PREVIEW_EXPIRED');assert.ok(!calls.includes('sendMessage'));
+ const sender=new ManualSender(()=>{}),{fake,calls,setEntity}=fixture();const id=previewId(await sender.preview(fake as never,new InboxReader(),input));setEntity(new Api.User({id:BigInt(999),firstName:'Changed',accessHash:BigInt(4)}));const reply=await sender.confirm(fake as never,id);assert.ok(!reply.ok&&reply.error.code==='SEND_PREVIEW_EXPIRED');assert.ok(!calls.includes('sendMessage'));
  const channel=new Api.Channel({id:BigInt(123),title:'Read only',broadcast:true,accessHash:BigInt(4)});const denied={...fake,getEntity:async()=>channel};const blocked=await sender.preview(denied as never,new InboxReader(),input);assert.ok(!blocked.ok&&blocked.error.code==='CHAT_WRITE_FORBIDDEN'&&blocked.capabilities?.text.state==='blocked');assert.ok(!calls.includes('sendMessage'));
 });
 
 test('photo and document dispatch one immutable buffer with explicit media mode',async()=>{
- for(const kind of ['photo','document'] as const){const sender=new ManualSender(),{fake,calls}=fixture();const attachment:AttachmentData={id:'00000000-0000-4000-8000-000000000001',name:kind==='photo'?'image.png':'test.txt',kind,size:3,bytes:new Uint8Array([1,2,3])};let actualMode:boolean|undefined;const sendFile=fake.sendFile;fake.sendFile=async(target,options)=>{actualMode=options.forceDocument;return sendFile(target,options);};const id=previewId(await sender.preview(fake as never,new InboxReader(),{...input,text:'caption',fileId:attachment.id},attachment));assert.ok(!calls.includes('sendFile'));const reply=await sender.confirm(fake as never,id);assert.ok(reply.ok&&reply.sent?.id===8);assert.equal(actualMode,kind==='document');assert.equal(calls.filter(c=>c==='sendFile').length,1);}
+ for(const kind of ['photo','document'] as const){const sender=new ManualSender(()=>{}),{fake,calls}=fixture();const attachment:AttachmentData={id:'00000000-0000-4000-8000-000000000001',name:kind==='photo'?'image.png':'test.txt',kind,size:3,bytes:new Uint8Array([1,2,3])};let actualMode:boolean|undefined;const sendFile=fake.sendFile;fake.sendFile=async(target,options)=>{actualMode=options.forceDocument;return sendFile(target,options);};const id=previewId(await sender.preview(fake as never,new InboxReader(),{...input,text:'caption',fileId:attachment.id},attachment));assert.ok(!calls.includes('sendFile'));const reply=await sender.confirm(fake as never,id);assert.ok(reply.ok&&reply.sent?.id===8);assert.equal(actualMode,kind==='document');assert.equal(calls.filter(c=>c==='sendFile').length,1);}
 });
 
 test('FloodWait and permission failures stop without retry; lost acknowledgments stay uncertain and token cannot be retried',async()=>{
- for(const error of [new errors.FloodWaitError({capture:30}),Error('CHAT_WRITE_FORBIDDEN'),Error('TIMEOUT')]){const sender=new ManualSender(),{fake}=fixture();let sends=0;fake.sendMessage=async()=>{sends++;throw error;};const id=previewId(await sender.preview(fake as never,new InboxReader(),input));const reply=await sender.confirm(fake as never,id);assert.ok(!reply.ok);if(!reply.ok){assert.equal(Boolean(reply.uncertain),error.message==='TIMEOUT');if(reply.error.code==='RATE_LIMIT')assert.equal(reply.error.retryAfter,30);}assert.equal(sends,1);await assert.rejects(sender.confirm(fake as never,id),/SEND_PREVIEW_EXPIRED/);}
- const sender=new ManualSender(),{fake}=fixture();fake.sendMessage=async()=>undefined as never;const id=previewId(await sender.preview(fake as never,new InboxReader(),input));const reply=await sender.confirm(fake as never,id);assert.ok(!reply.ok&&reply.uncertain);
+ for(const error of [new errors.FloodWaitError({capture:30}),Error('CHAT_WRITE_FORBIDDEN'),Error('TIMEOUT')]){const sender=new ManualSender(()=>{}),{fake}=fixture();let sends=0;fake.sendMessage=async()=>{sends++;throw error;};const id=previewId(await sender.preview(fake as never,new InboxReader(),input));const reply=await sender.confirm(fake as never,id);assert.ok(!reply.ok);if(!reply.ok){assert.equal(Boolean(reply.uncertain),error.message==='TIMEOUT');if(reply.error.code==='RATE_LIMIT')assert.equal(reply.error.retryAfter,30);}assert.equal(sends,1);await assert.rejects(sender.confirm(fake as never,id),/SEND_PREVIEW_EXPIRED/);}
+ const sender=new ManualSender(()=>{}),{fake}=fixture();fake.sendMessage=async()=>undefined as never;const id=previewId(await sender.preview(fake as never,new InboxReader(),input));const reply=await sender.confirm(fake as never,id);assert.ok(!reply.ok&&reply.uncertain);
 });
 
 test('native file loader snapshots only regular bounded files, verifies photo signature, and never returns a path',async()=>{
@@ -52,7 +52,7 @@ test('chunk upload stops immediately on FloodWait and never dispatches media aft
  const file:AttachmentData={id:'00000000-0000-4000-8000-000000000001',name:'test.txt',size:600000,kind:'document',bytes:new Uint8Array(600000)};
  let uploads=0;const fake={invoke:async()=>{uploads++;throw new errors.FloodWaitError({capture:120});}};
  await assert.rejects(uploadSendAttachment(fake as never,file));assert.equal(uploads,1);
- const sender=new ManualSender(),fixtureClient=fixture();fixtureClient.fake.invoke=fake.invoke;const id=previewId(await sender.preview(fixtureClient.fake as never,new InboxReader(),{...input,text:'caption',fileId:file.id},file));const reply=await sender.confirm(fixtureClient.fake as never,id);assert.ok(!reply.ok&&!reply.uncertain&&reply.error.retryAfter===120);assert.ok(!fixtureClient.calls.includes('sendFile'));assert.equal(uploads,2);
+ const sender=new ManualSender(()=>{}),fixtureClient=fixture();fixtureClient.fake.invoke=fake.invoke;const id=previewId(await sender.preview(fixtureClient.fake as never,new InboxReader(),{...input,text:'caption',fileId:file.id},file));const reply=await sender.confirm(fixtureClient.fake as never,id);assert.ok(!reply.ok&&!reply.uncertain&&reply.error.retryAfter===120);assert.ok(!fixtureClient.calls.includes('sendFile'));assert.equal(uploads,2);
 });
 
 test('real SDK sendFile consumes preuploaded media without entering SDK upload/retry code',async()=>{
@@ -64,7 +64,7 @@ test('real SDK sendFile consumes preuploaded media without entering SDK upload/r
 });
 
 test('preview expiration and reset prevent sending, and permissions revoked after preview are enforced',async()=>{
- const sender=new ManualSender(),{fake,calls}=fixture();const id=previewId(await sender.preview(fake as never,new InboxReader(),input));const original=Date.now;
+ const sender=new ManualSender(()=>{}),{fake,calls}=fixture();const id=previewId(await sender.preview(fake as never,new InboxReader(),input));const original=Date.now;
  try{const later=original()+301000;Date.now=()=>later;await assert.rejects(sender.confirm(fake as never,id),/SEND_PREVIEW_EXPIRED/);}finally{Date.now=original;}
  assert.ok(!calls.includes('sendMessage'));sender.reset();await assert.rejects(sender.confirm(fake as never,id),/SEND_PREVIEW_EXPIRED/);
  let allowed=true;const channel=new Api.Channel({id:BigInt(1),accessHash:BigInt(2),title:'Kênh thử',broadcast:true,creator:true});const client={...fake,getEntity:async()=>{channel.creator=allowed;return channel;}};
