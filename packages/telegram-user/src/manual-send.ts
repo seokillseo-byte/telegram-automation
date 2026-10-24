@@ -1,6 +1,7 @@
+import {parseScheduledPayload,type ScheduledPayload,type ScheduledPeer} from '../../shared/src/queue';
 import {sendCapabilities} from './send-capabilities';
 import {randomUUID,createHash} from 'node:crypto';
-import {generateRandomLong} from 'telegram/Helpers';
+import {generateRandomLong,returnBigInt} from 'telegram/Helpers';
 import {Api,type TelegramClient} from 'telegram';
 import {identity} from './index';
 import {classifyError,type Identity} from '../../shared/src/protocol';
@@ -52,6 +53,30 @@ export class ManualSender{
   const info=attachment?{id:attachment.id,name:attachment.name,size:attachment.size,kind:attachment.kind}:undefined;
   const preview:SendPreview={id,recipient,text:action.text,attachment:info,reply:reply?.info,capabilities,expiresAt:new Date(Date.now()+5*60*1000).toISOString()};
   this.draft={preview,peer,attachment,replyFingerprint:reply?.fingerprint};return {ok:true,preview,capabilities};
+ }
+ exportSchedule(id:string,accountId:string):ScheduledPayload{
+  sendId(id);const draft=this.draft;if(!draft||draft.preview.id!==id||Date.parse(draft.preview.expiresAt)<Date.now())throw Error('SEND_PREVIEW_EXPIRED');
+  if(draft.attachment||draft.preview.reply)throw Error('SCHEDULE_TEXT_ONLY');
+  let peer:ScheduledPeer;
+  if(draft.peer instanceof Api.InputPeerSelf)peer={type:'self'};
+  else if(draft.peer instanceof Api.InputPeerUser)peer={type:'user',id:draft.peer.userId.toString(),accessHash:draft.peer.accessHash.toString()};
+  else if(draft.peer instanceof Api.InputPeerChannel)peer={type:'channel',id:draft.peer.channelId.toString(),accessHash:draft.peer.accessHash.toString()};
+  else if(draft.peer instanceof Api.InputPeerChat)peer={type:'chat',id:draft.peer.chatId.toString()};else throw Error('SCHEDULE_TEXT_ONLY');
+  const payload=parseScheduledPayload({accountId,recipient:draft.preview.recipient,peer,text:draft.preview.text,randomId:generateRandomLong().toString(),purpose:'personal'});this.draft=undefined;return payload;
+ }
+ async scheduled(client:TelegramClient,input:unknown,accountId:string):Promise<ManualReply>{
+  let dispatched=false;
+  try{
+   this.checkCooldown();const payload=parseScheduledPayload(input);if(payload.accountId!==accountId)throw Error('QUEUE_ACCOUNT_MISMATCH');
+   const ref=payload.peer,peer=ref.type==='self'?new Api.InputPeerSelf():ref.type==='user'?new Api.InputPeerUser({userId:returnBigInt(ref.id),accessHash:returnBigInt(ref.accessHash)}):ref.type==='channel'?new Api.InputPeerChannel({channelId:returnBigInt(ref.id),accessHash:returnBigInt(ref.accessHash)}):new Api.InputPeerChat({chatId:returnBigInt(ref.id)});
+   const entity=await client.getEntity(peer);if(!supported(entity))throw Error('SEND_FORBIDDEN');const recipient=identity(entity);
+   if(recipient.id!==payload.recipient.id||recipient.peerType!==payload.recipient.peerType)throw Error('QUEUE_ACCOUNT_MISMATCH');allowed(entity,false,false);
+   const request=new Api.messages.SendMessage({peer,message:payload.text,entities:[],noWebpage:true,randomId:returnBigInt(payload.randomId)});dispatched=true;const result=await client.invoke(request);
+   let remoteId:number|undefined;
+   if(result instanceof Api.UpdateShortSentMessage)remoteId=result.id;
+   else if(result instanceof Api.Updates||result instanceof Api.UpdatesCombined){const mapped=result.updates.find((update):update is Api.UpdateMessageID=>update instanceof Api.UpdateMessageID&&update.randomId?.toString()===payload.randomId);remoteId=mapped?.id;}
+   if(!remoteId||remoteId<=0)throw Error('SEND_NO_ACK');return {ok:true,sent:{id:remoteId,recipient}};
+  }catch(error){const mapped=this.noteFailure(error),rpc=Number((error as {code?:number}).code);return {ok:false,error:mapped,uncertain:dispatched&&!(rpc>=400&&rpc<500)&&mapped.code!=='RATE_LIMIT'&&!['CHAT_WRITE_FORBIDDEN','PEER_FLOOD','USER_PRIVACY_RESTRICTED','USER_IS_BLOCKED','YOU_BLOCKED_USER','USER_BANNED_IN_CHANNEL'].includes(mapped.code)};}
  }
  async confirm(client:TelegramClient,id:string):Promise<ManualReply>{
   sendId(id);const draft=this.draft;if(!draft||draft.preview.id!==id||Date.parse(draft.preview.expiresAt)<Date.now())throw Error('SEND_PREVIEW_EXPIRED');

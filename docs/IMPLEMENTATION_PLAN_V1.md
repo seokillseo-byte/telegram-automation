@@ -234,3 +234,6 @@ Reply tin cụ thể trong hội thoại đã tải; gắn đúng peer/ID, previ
 
 ## P4.5 — 0.9.0
 Bảng capability theo người nhận/loại nội dung, kiểm tra lại trước dispatch, lỗi tiếng Việt có mã/hướng xử lý và chặn gửi thủ công trong FloodWait đã ghi nhận. Không thêm queue/lịch. Xem SEND_RIGHTS_V0.9.md; Phase 4 còn cần T08–T09 bằng tài khoản thật trước nghiệm thu.
+
+## Phase 5 bước đầu — 0.10.0
+Người dùng xác nhận gửi thủ công thành công đến tài khoản thật. Triển khai P5.1 lịch văn bản một lần và nền P5.2 (SQLite claim/dedupe/request ID), điều khiển/recovery tối thiểu. Chưa hoàn thành retry P5.3 hoặc consent/suppression P5.5, chưa có lịch marketing/tệp/reply. Xem ONE_TIME_QUEUE_V0.10.md; cần nghiệm thu lịch live trước khi coi phần này hoàn tất.

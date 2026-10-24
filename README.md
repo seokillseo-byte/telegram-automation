@@ -55,3 +55,7 @@ Trả lời tin đã tải trong đúng hội thoại; dùng mẫu đã lưu và
 ## Quyền và lỗi gửi P4.5 — 0.9.0
 
 Kiểm tra quyền theo người nhận và loại nội dung, giữ trạng thái chưa xác định khi thiếu dữ liệu; mã/hướng xử lý lỗi và FloodWait đếm ngược không tự retry. Xem [hướng dẫn nghiệm thu](docs/SEND_RIGHTS_V0.9.md).
+
+## Lịch văn bản một lần — 0.10.0
+
+Bước đầu Phase 5: xác nhận lịch từ preview, lưu SQLite với payload mã hóa Windows, pause/resume/cancel và review lịch lỡ giờ. App cần mở và kết nối đúng tài khoản. Chưa có tự retry/lịch media/reply/marketing. Xem [hướng dẫn nghiệm thu](docs/ONE_TIME_QUEUE_V0.10.md).
