@@ -35,3 +35,7 @@ Không commit credential, session hoặc dữ liệu tài khoản thật. Kiểm
 ## Mẫu tin 0.4.0
 
 Thư viện mẫu tin dùng offline: tạo/sửa/nhân bản/tìm/xóa, xem trước biến và lưu SQLite. Chưa có gửi tin. Xem [hướng dẫn và nghiệm thu](docs/MESSAGE_TEMPLATES_V0.4.md).
+
+## Hộp thư chỉ đọc 0.5.0
+
+Danh sách hội thoại và lịch sử có phân trang, lọc danh sách đã tải, giữ tạm trong bộ nhớ. Chưa gửi tin, tải tệp hoặc cập nhật thời gian thực. Xem [hướng dẫn và nghiệm thu](docs/INBOX_READ_V0.5.md).

@@ -1,3 +1,5 @@
+import {InboxReader} from '../../../../packages/telegram-user/src/inbox';
+const inbox=new InboxReader();
 import {parentPort} from 'node:worker_threads';
 import {Api} from 'telegram';
 import {makeClient,identity,search} from '../../../../packages/telegram-user/src';
@@ -19,7 +21,7 @@ port.on('message',async (message)=>{
  try{
   if(message.type==='login'||message.type==='restore'){
    authFailure=undefined;stage='creating_client';emit({state:'connecting',stage});
-   if(client)await client.destroy();
+   inbox.reset();if(client)await client.destroy();
    client=makeClient(message.apiId,message.apiHash,message.session??'');
    stage='connecting_transport';emit({state:'connecting',stage});
    await client.connect();
@@ -33,6 +35,10 @@ port.on('message',async (message)=>{
    stage='loading_identity';emit({state:'connecting',stage});
    const me=await client.getMe();
    port.postMessage({kind:'session',value:{apiId:message.apiId,apiHash:message.apiHash,session:client.session.save()},identity:identity(me as Api.User)});
+  } else if(message.type==='inbox'){
+   try{if(!client||!await client.checkAuthorization())throw Error('NOT_CONNECTED');
+    port.postMessage({kind:'inbox',reply:await inbox.read(client,message.action)});
+   }catch(error){port.postMessage({kind:'inbox',reply:{ok:false,error:classifyError(error)}});}
   } else if(message.type==='search'){
    if(!client||!await client.checkAuthorization())throw Error('NOT_CONNECTED');
    stage=message.exact?'resolving_username':'searching_public';emit({state:'searching',stage});const results=await search(client,message.query,message.exact);emit({state:'search_complete',stage:'search_complete',queryResults:results,searchContext:{query:message.query,exact:message.exact}});
@@ -41,6 +47,7 @@ port.on('message',async (message)=>{
    const groupReport=await analyzeGroup(client,message.target,next=>{stage=next;emit({state:'analyzing_group',stage});});
    stage='group_analysis_complete';emit({state:'group_analysis_complete',stage,groupReport});
   } else if(message.type==='logout'){
+   inbox.reset();
    if(client){await client.invoke(new Api.auth.LogOut());await client.destroy();client=undefined;}
    port.postMessage({kind:'logged_out'});
   }

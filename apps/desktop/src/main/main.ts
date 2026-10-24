@@ -1,3 +1,4 @@
+import {parseInboxAction,type InboxReply} from '../../../../packages/shared/src/inbox';
 import {parseAppAction,type AppReply} from '../../../../packages/shared/src/app-state';
 import {app,BrowserWindow,ipcMain,safeStorage,dialog} from 'electron';
 import {Worker} from 'node:worker_threads';
@@ -24,6 +25,7 @@ let currentResults:ResearchPeer[]=[];
 let userIdentity:Identity|undefined;
 let exporting=false;
 let busy=false;
+let pendingInbox:((reply:InboxReply)=>void)|undefined;
 let generation=0;
 let encryption=false;
 let latest:Status={state:'disconnected'};
@@ -31,14 +33,18 @@ const page=pathToFileURL(join(__dirname,'index.html')).href;
 let lastEvent='';
 function emit(status:Status){if(status.state!==lastEvent){try{research?.addEvent(status.state);}catch{/* logging must not interrupt Telegram */}lastEvent=status.state;}latest={...status,encryption,userIdentity,userConnected:Boolean(userIdentity&&worker)};if(win&&!win.isDestroyed())win.webContents.send('spike:status',latest);}
 function stopWatch(){clearTimeout(watchdog);watchdog=undefined;}
-async function stopWorker(keepBusy=false){stopWatch();const previous=worker;worker=undefined;userIdentity=undefined;currentResults=[];if(!keepBusy)busy=false;if(previous)await previous.terminate();}
-function startWatch(){stopWatch();watchdog=setTimeout(()=>{void stopWorker().then(()=>emit({state:'error',error:classifyError(Error('TIMEOUT'))}));},90000);}
+async function stopWorker(keepBusy=false,inboxError='CANCELLED'){stopWatch();if(pendingInbox){pendingInbox({ok:false,error:classifyError(Error(inboxError))});pendingInbox=undefined;}const previous=worker;worker=undefined;userIdentity=undefined;currentResults=[];if(!keepBusy)busy=false;if(previous)await previous.terminate();}
+function startWatch(){stopWatch();watchdog=setTimeout(()=>{void stopWorker(false,'TIMEOUT').then(()=>emit({state:'error',error:classifyError(Error('TIMEOUT'))}));},90000);}
 function getWorker(){
  if(worker)return worker;
  const current=new Worker(join(__dirname,'worker.cjs'));worker=current;
  current.on('message',async message=>{
   if(worker!==current)return;
   stopWatch();
+  if(message.kind==='inbox'){
+   if(!message.reply.ok&&['NOT_CONNECTED','AUTH_KEY_UNREGISTERED','SESSION_REVOKED','SESSION_EXPIRED'].includes(message.reply.error.code)){await stopWorker(false,message.reply.error.code);emit({state:'error',error:message.reply.error});return;}
+   const resolve=pendingInbox;pendingInbox=undefined;busy=false;emit(message.reply.ok?{state:'inbox_ready'}:{state:'error',error:message.reply.error});resolve?.(message.reply);return;
+  }
   if(message.kind==='status'){
    if(message.status.state==='group_analysis_complete'&&message.status.groupReport){
     try{research.saveGroupReport(researchScope,message.status.groupReport);}catch{busy=false;emit({state:'error',stage:'saving_group_report',error:classifyError(Error('RESEARCH_ERROR'))});return;}
@@ -56,8 +62,8 @@ function getWorker(){
    try{await vault.save(message.value);if(worker!==current)return;busy=false;userIdentity=message.identity;researchScope=message.identity.id;research.setAccount(researchScope);emit({state:'connected',identity:message.identity});}catch(error){await stopWorker();emit({state:'error',error:classifyError(error)});}
   } else if(message.kind==='logged_out'){await vault.clear();userIdentity=undefined;currentResults=[];busy=false;emit({state:'disconnected'});}
  });
- current.on('error',error=>{const mapped=classifyError(error);void stopWorker().then(()=>emit({state:'error',stage:'starting_worker',error:mapped.code==='TELEGRAM_ERROR'?classifyError(Error('WORKER_FAILED')):mapped}));});
- current.on('exit',()=>{if(worker===current){worker=undefined;userIdentity=undefined;stopWatch();busy=false;emit({state:'error',error:classifyError(Error('WORKER_EXIT'))});}});
+ current.on('error',error=>{const mapped=classifyError(error);void stopWorker(false,mapped.code).then(()=>emit({state:'error',stage:'starting_worker',error:mapped.code==='TELEGRAM_ERROR'?classifyError(Error('WORKER_FAILED')):mapped}));});
+ current.on('exit',()=>{if(worker===current)void stopWorker(false,'WORKER_EXIT').then(()=>emit({state:'error',error:classifyError(Error('WORKER_EXIT'))}));});
  return current;
 }
 if(!app.requestSingleInstanceLock())app.quit();
@@ -71,6 +77,16 @@ else app.whenReady().then(async()=>{
  win.webContents.on('will-navigate',(event,url)=>{if(url!==page)event.preventDefault();});
  win.webContents.session.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
  win.webContents.session.webRequest.onBeforeRequest((details,callback)=>callback({cancel:!details.url.startsWith(pathToFileURL(__dirname).href+'/')}));
+ ipcMain.handle('inbox:action',async(event,input):Promise<InboxReply>=>{
+  if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
+  try{
+   const action=parseInboxAction(input);
+   if(!worker||!userIdentity)throw Error('NOT_CONNECTED');
+   if(busy)throw Error('BUSY');
+   busy=true;emit({state:'inbox_loading'});startWatch();
+   return await new Promise<InboxReply>(resolve=>{pendingInbox=resolve;try{worker!.postMessage({type:'inbox',action});}catch(error){pendingInbox=undefined;busy=false;stopWatch();emit({state:'error',error:classifyError(error)});resolve({ok:false,error:classifyError(error)});}});
+  }catch(error){return {ok:false,error:classifyError(error)};}
+ });
  ipcMain.handle('app:action',async(event,input):Promise<AppReply>=>{
   if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
   try{
@@ -178,6 +194,13 @@ else app.whenReady().then(async()=>{
    if(!ok)throw Error('SMOKE_FAILED');
    const navigationOk=await win.webContents.executeJavaScript(`(async()=>{const buttons=[...document.querySelectorAll('nav button')];if(buttons.length!==11)return false;for(const button of buttons){button.click();await new Promise(resolve=>setTimeout(resolve,100));if(document.querySelector('.workspace')?.dataset.page!==button.dataset.page)return false;}return true;})()`);
    if(!navigationOk)throw Error('SMOKE_FAILED');console.log('PHASE1_NAVIGATION_PASS');
+   const inboxOk=await win.webContents.executeJavaScript(`(async()=>{
+    document.querySelector('nav button[data-page="inbox"]').click();await new Promise(resolve=>setTimeout(resolve,150));
+    if(!document.querySelector('[data-testid="inbox-disconnected"]')||!document.querySelector('[data-testid="inbox-refresh"]').disabled||typeof window.spike.inbox!=='function')return false;
+    const disconnected=await window.spike.inbox({type:'dialogs'}),invalid=await window.spike.inbox({type:'send',text:'must not send'});
+    return !disconnected.ok&&disconnected.error.code==='NOT_CONNECTED'&&!invalid.ok&&invalid.error.code==='INPUT_INVALID';
+   })()`);
+   if(!inboxOk)throw Error('SMOKE_FAILED');console.log('INBOX_DISCONNECTED_IPC_PASS');
    const templatesOk=await win.webContents.executeJavaScript(`(async()=>{
     document.querySelector('nav button[data-page="templates"]').click();await new Promise(resolve=>setTimeout(resolve,150));
     const input=document.querySelector('[data-testid="template-name"]'),body=document.querySelector('[data-testid="template-body"]');

@@ -219,3 +219,6 @@ Theo phạm vi được người dùng chấp nhận: bổ sung thống kê nhó
 
 ## Thư viện mẫu tin — 0.4.0
 Triển khai riêng phần mẫu tin của P4.4 để dùng offline trong lúc các luồng kết nối/hộp thư tiếp tục theo kế hoạch. CRUD, tìm kiếm, nhân bản, xem trước biến và migration schema 4; chưa có gửi tin hoặc hoàn tất Phase 4. Xem MESSAGE_TEMPLATES_V0.4.md.
+
+## Hộp thư chỉ đọc — 0.5.0
+Bước tiếp theo đã thống nhất: P4.1 danh sách hội thoại và lịch sử có phân trang, giới hạn giữ tạm trong bộ nhớ, không ghi nội dung xuống đĩa. P4.2 cập nhật thời gian thực và P4.3 gửi tin chưa triển khai; không bổ sung tính năng ngoài bước đọc. Xem INBOX_READ_V0.5.md để nghiệm thu.
