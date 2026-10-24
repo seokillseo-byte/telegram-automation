@@ -75,6 +75,8 @@ else app.whenReady().then(async()=>{
   if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
   try{
    const action=parseAppAction(input);
+   if(action.type==='saveTemplate')research.saveTemplate(action.template);
+   if(action.type==='deleteTemplate')research.deleteTemplate(action.id);
    if(action.type==='savePreferences')research.savePreferences(action.preferences);
    if(action.type==='clearLogs')research.clearEvents();
    if(action.type==='exportLogs'){
@@ -88,7 +90,7 @@ else app.whenReady().then(async()=>{
     }finally{exporting=false;}
    }
    return {ok:true,snapshot:research.appSnapshot(researchScope)};
-  }catch(error){return {ok:false,error:classifyError(error).message};}
+  }catch(error){const code=error instanceof Error?error.message:'';const messages:Record<string,string>={TEMPLATE_VARIABLE_INVALID:'Biến không hợp lệ. Dùng {{ten}}, {{san_pham}}, {{cong_ty}}, {{lien_ket}}.',TEMPLATE_NOT_FOUND:'Mẫu đã bị xóa. Hãy tải lại danh sách.',TEMPLATE_LIMIT:'Đã đạt giới hạn 200 mẫu. Hãy xóa mẫu không dùng.'};return {ok:false,error:messages[code]??classifyError(error).message};}
  });
  ipcMain.handle('analysis:action',async(event,input):Promise<AnalysisResponse>=>{
   if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
@@ -176,6 +178,18 @@ else app.whenReady().then(async()=>{
    if(!ok)throw Error('SMOKE_FAILED');
    const navigationOk=await win.webContents.executeJavaScript(`(async()=>{const buttons=[...document.querySelectorAll('nav button')];if(buttons.length!==11)return false;for(const button of buttons){button.click();await new Promise(resolve=>setTimeout(resolve,100));if(document.querySelector('.workspace')?.dataset.page!==button.dataset.page)return false;}return true;})()`);
    if(!navigationOk)throw Error('SMOKE_FAILED');console.log('PHASE1_NAVIGATION_PASS');
+   const templatesOk=await win.webContents.executeJavaScript(`(async()=>{
+    document.querySelector('nav button[data-page="templates"]').click();await new Promise(resolve=>setTimeout(resolve,150));
+    const input=document.querySelector('[data-testid="template-name"]'),body=document.querySelector('[data-testid="template-body"]');
+    const setValue=(node,value)=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node),'value').set.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));};
+    setValue(input,'Kiểm tra giao diện');setValue(body,'Chào {{ten}}');await new Promise(resolve=>setTimeout(resolve,100));
+    if(!document.querySelector('[data-testid="template-preview"]').textContent.includes('Chào {{ten}}'))return false;
+    document.querySelector('[data-testid="template-save"]').click();await new Promise(resolve=>setTimeout(resolve,300));
+    const state=await window.spike.app({type:'get'});if(!state.ok)return false;
+    const row=state.snapshot.templates.find(item=>item.name==='Kiểm tra giao diện');if(!row)return false;
+    const result=await window.spike.app({type:'deleteTemplate',id:row.id});return result.ok&&!result.snapshot.templates.some(item=>item.id===row.id);
+   })()`);
+   if(!templatesOk)throw Error('SMOKE_FAILED');console.log('TEMPLATES_RENDERER_IPC_PASS');
    if(process.platform==='win32'){
     if(!encryption)throw Error('ENCRYPTION_UNAVAILABLE');
     const directory=await mkdtemp(join(tmpdir(),'telegram-dpapi-'));
@@ -204,7 +218,9 @@ else app.whenReady().then(async()=>{
     const workbook=await toWorkbook(snapshot.records,'1');if(workbook[0]!==80||workbook[1]!==75)throw Error('EXPORT_ERROR');
     const report:GroupReport={id:'00000000-0000-4000-8000-000000000001',target:'research_demo',username:'research_demo',groupId:'12345678901234567',title:'Kênh thử',kind:'channel',about:'Mẫu kiểm chứng',members:null,analyzedAt:new Date().toISOString(),sampleLimit:100,fetched:1,historyStatus:'available',mayBeTruncated:false,warnings:[],...aggregateSample([{id:1,date:1700000000,text:'Nghiên cứu',views:5}])};
     probeStore.savePreferences({timeZone:'UTC',compact:true,startPage:'overview'});probeStore.addEvent('connected');
+    const templateId=probeStore.saveTemplate({name:'Mẫu kiểm chứng',body:'Chào {{ten}}'});
     probeStore.saveGroupReport('1',report);probeStore.close();probeStore=new ResearchStore(file);
+    if(probeStore.templates()[0]?.id!==templateId)throw Error('RESEARCH_ERROR');probeStore.deleteTemplate(templateId);if(probeStore.templates().length)throw Error('RESEARCH_ERROR');console.log('TEMPLATES_SQLITE_PASS');
     if(probeStore.preferences().timeZone!=='UTC'||!probeStore.appSnapshot('1').events.length)throw Error('RESEARCH_ERROR');console.log('PHASE1_SETTINGS_LOGS_PASS');
     const reports=probeStore.listGroupReports('1');if(reports.length!==1||reports[0].metrics.views.total!==5)throw Error('RESEARCH_ERROR');
     const analysisBook=await groupWorkbook(reports);if(analysisBook[0]!==80||analysisBook[1]!==75)throw Error('EXPORT_ERROR');
