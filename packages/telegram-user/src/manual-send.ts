@@ -71,7 +71,7 @@ export class ManualSender{
    const ref=payload.peer,peer=ref.type==='self'?new Api.InputPeerSelf():ref.type==='user'?new Api.InputPeerUser({userId:returnBigInt(ref.id),accessHash:returnBigInt(ref.accessHash)}):ref.type==='channel'?new Api.InputPeerChannel({channelId:returnBigInt(ref.id),accessHash:returnBigInt(ref.accessHash)}):new Api.InputPeerChat({chatId:returnBigInt(ref.id)});
    const entity=await client.getEntity(peer);if(!supported(entity))throw Error('SEND_FORBIDDEN');const recipient=identity(entity);
    if(recipient.id!==payload.recipient.id||recipient.peerType!==payload.recipient.peerType)throw Error('QUEUE_ACCOUNT_MISMATCH');allowed(entity,false,false);
-   const request=new Api.messages.SendMessage({peer,message:payload.text,entities:[],noWebpage:true,randomId:returnBigInt(payload.randomId)});dispatched=true;const result=await client.invoke(request);
+   const request=new Api.messages.SendMessage({peer,message:payload.text,entities:[],noWebpage:true,randomId:returnBigInt(payload.randomId)});dispatched=true;const retries=client._requestRetries;let result:Api.TypeUpdates;try{client._requestRetries=1;result=await client.invoke(request);}finally{client._requestRetries=retries;}
    let remoteId:number|undefined;
    if(result instanceof Api.UpdateShortSentMessage)remoteId=result.id;
    else if(result instanceof Api.Updates||result instanceof Api.UpdatesCombined){const mapped=result.updates.find((update):update is Api.UpdateMessageID=>update instanceof Api.UpdateMessageID&&update.randomId?.toString()===payload.randomId);remoteId=mapped?.id;}

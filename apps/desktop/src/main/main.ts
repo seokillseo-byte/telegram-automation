@@ -84,7 +84,7 @@ function getWorker(){
   }
   if(message.kind==='queue_result'){
    const flight=queueFlight;if(!flight||flight.job.id!==message.id)return;
-   try{const reply=message.reply;queue.finish(flight.job.accountId,flight.job.id,reply.ok&&reply.sent?'sent':!reply.ok&&reply.uncertain?'uncertain':'failed',!reply.ok?reply.error.code:undefined,reply.ok?reply.sent?.id:undefined);emit({state:'queue_ready'});}catch{emit({state:'error',error:classifyError(Error('QUEUE_STORE_ERROR'))});}finally{queueFlight=undefined;busy=false;}return;
+   try{const reply=message.reply;if(reply.ok&&reply.sent)queue.finish(flight.job.accountId,flight.job.id,'sent',undefined,reply.sent.id);else if(!reply.ok)queue.reject(flight.job.accountId,flight.job.id,reply.error,Boolean(reply.uncertain));else queue.finish(flight.job.accountId,flight.job.id,'uncertain','SEND_NO_ACK');emit({state:'queue_ready'});}catch{emit({state:'error',error:classifyError(Error('QUEUE_STORE_ERROR'))});}finally{queueFlight=undefined;busy=false;}return;
   }
   if(message.kind==='manual'){const resolve=pendingManual;pendingManual=undefined;pendingSchedule=undefined;manualDispatch=false;busy=false;if(!message.reply.ok&&['NOT_CONNECTED','AUTH_KEY_UNREGISTERED','SESSION_REVOKED','SESSION_EXPIRED'].includes(message.reply.error.code))await stopWorker(false,message.reply.error.code);emit(message.reply.ok?{state:'manual_ready'}:{state:'error',error:message.reply.error});resolve?.(message.reply);return;}
   if(message.kind==='inbox'){
@@ -353,6 +353,11 @@ else app.whenReady().then(async()=>{
      const job=queue.list('1')[0],payload=await decryptJob(queue.detail('1',job.id).payload);if(payload.text!==fixtureScheduleText)throw Error('SMOKE_FAILED');
      if((await readFile(join(directory,'queue.sqlite'))).includes(Buffer.from(fixtureScheduleText)))throw Error('PLAINTEXT_FOUND');
      await win.webContents.executeJavaScript(`document.querySelector('nav button[data-page="inbox"]').click()`);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,100))`);queue.close();queue=new QueueStore(join(directory,'queue.sqlite'));if(queue.list('1')[0].state!=='cancelled')throw Error('SMOKE_FAILED');console.log('QUEUE_SCHEDULE_CONTROLS_PASS');console.log('QUEUE_DPAPI_PERSISTENCE_PASS');
+     const retryAt=Date.now()+60000,retryJob=queue.create('1','00000000-0000-4000-8000-000000000093',job.recipient,new Date(retryAt).toISOString(),'UTC',await safeStorage.encryptStringAsync(JSON.stringify(payload)));queue.claim('1',retryAt);queue.reject('1',retryJob.id,{code:'RATE_LIMIT',retryAfter:600},false,retryAt);
+     await win.webContents.executeJavaScript(`document.querySelector('nav button[data-page="schedule"]').click()`);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,250))`);
+     const retryOk=await win.webContents.executeJavaScript(`(async()=>{const button=(state,text)=>[...document.querySelectorAll('[data-job-state="'+state+'"] button')].find(b=>b.textContent===text);if(!document.querySelector('[data-job-state="retry_wait"]')?.textContent.includes('1/3'))return false;button('retry_wait','Tạm dừng').click();await new Promise(resolve=>setTimeout(resolve,150));button('paused','Tiếp tục').click();await new Promise(resolve=>setTimeout(resolve,150));const original=window.confirm;window.confirm=()=>true;button('retry_wait','Hủy lịch').click();window.confirm=original;await new Promise(resolve=>setTimeout(resolve,150));return !document.querySelector('[data-job-state="retry_wait"]');})()`);
+     if(!retryOk||queue.detail('1',retryJob.id).job.state!=='cancelled'||Number(fixtureManualSends)!==4)throw Error('SMOKE_FAILED');console.log('QUEUE_CLASSIFIED_RETRY_CONTROLS_PASS');
+
     }finally{queue.close();queue=previousQueue;researchScope=previousScope;await rm(directory,{recursive:true,force:true});}
    }
    win.webContents.send('spike:status',{state:'disconnected',userConnected:false});
