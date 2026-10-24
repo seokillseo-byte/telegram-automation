@@ -22,3 +22,6 @@ pnpm desktop:dev
 
 Build trên Windows: `pnpm dist:win`. Bộ cài tải trong Actions → Phase 0 Windows → Artifacts sau khi run xanh.
 Không commit credential, session hoặc dữ liệu tài khoản thật. Kiểm chứng live thực hiện trên máy chủ tài khoản; CI không giữ token/OTP.
+
+## Module Nghiên cứu ngành 0.1.0
+[Hướng dẫn tính năng và nghiệm thu](docs/INDUSTRY_RESEARCH_V0.1.md): phân nguồn, lọc, lưu SQLite, ghi chú, so sánh, xuất Excel/CSV. Không có lặp truy vấn tự động hoặc gửi tin. Tải artifact Telegram-Industry-Research-Windows-x64 từ Windows Desktop Actions trên nhánh industry-research-v0.1.

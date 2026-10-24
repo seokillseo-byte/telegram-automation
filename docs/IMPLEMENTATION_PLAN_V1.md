@@ -207,3 +207,6 @@ V1 chỉ hoàn tất khi người dùng đi hết luồng chính trên bộ cài
 - https://www.electronjs.org/docs/latest/api/safe-storage
 
 Các liên kết là tài liệu tham chiếu cho implementation; chưa phải xác nhận mọi SDK/cấu hình trong kế hoạch đã được kiểm chứng.
+
+## Điều chỉnh phạm vi theo yêu cầu nghiên cứu ngành
+Bản 0.1.0 đưa một phần SQLite và tìm kiếm/lưu/xuất của Phase 1/3 lên trước, dựa trên Phase 0 đã có đăng nhập/khôi phục/tìm kiếm thật do người dùng kiểm tra. Không bao gồm campaign hoặc gửi tin. Xem INDUSTRY_RESEARCH_V0.1.md để biết tiêu chí và giới hạn; không coi toàn bộ Phase 1–3 đã hoàn thành.

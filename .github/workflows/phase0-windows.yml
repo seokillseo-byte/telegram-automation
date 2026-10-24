@@ -1,7 +1,7 @@
-name: Phase 0 Windows
+name: Windows Desktop
 on:
   push:
-    branches: [main, phase-0-foundation-spike]
+    branches: [main, phase-0-foundation-spike, industry-research-v0.1]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -42,7 +42,7 @@ jobs:
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: Telegram-Automation-Phase0-Windows-x64
+          name: Telegram-Industry-Research-Windows-x64
           path: |
             release/*.exe
             release/*.sha256
