@@ -1,3 +1,4 @@
+import type {BotIntroAction} from '../../../../packages/shared/src/bot-intro';
 import type {PolicyAction} from '../../../../packages/shared/src/send-policy';
 import type {QueueAction} from '../../../../packages/shared/src/queue';
 import type {ManualAction} from '../../../../packages/shared/src/manual-send';
@@ -8,6 +9,7 @@ import type {Action,Status} from '../../../../packages/shared/src/protocol';
 import type {AnalysisAction} from '../../../../packages/shared/src/group-analysis';
 import type {ResearchAction} from '../../../../packages/shared/src/research';
 contextBridge.exposeInMainWorld('spike',{
+ botIntro:(action:BotIntroAction)=>ipcRenderer.invoke('bot-intro:action',action),
  policy:(action:PolicyAction)=>ipcRenderer.invoke('policy:action',action),
  queue:(action:QueueAction)=>ipcRenderer.invoke('queue:action',action),
  manual:(action:ManualAction)=>ipcRenderer.invoke('manual:action',action),
