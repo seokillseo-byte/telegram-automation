@@ -58,8 +58,8 @@ test('chunk upload stops immediately on FloodWait and never dispatches media aft
 test('real SDK sendFile consumes preuploaded media without entering SDK upload/retry code',async()=>{
  const sdkSendFile=sdk('telegram/client/uploads').sendFile;
  for(const kind of ['photo','document'] as const){let dispatches=0;const handle=new Api.InputFile({id:BigInt(42),parts:1,name:'test.png',md5Checksum:''});const media=kind==='photo'?new Api.InputMediaUploadedPhoto({file:handle}):new Api.InputMediaUploadedDocument({file:handle,mimeType:'application/octet-stream',attributes:[new Api.DocumentAttributeFilename({fileName:'test.png'})],forceFile:true});
-  const fake={getInputEntity:async()=>peer,buildReplyMarkup:()=>undefined,invoke:async(request:{className:string;randomId:unknown;media:unknown;getBytes:()=>Buffer})=>{assert.equal(request.className,'messages.SendMedia');assert.equal(request.media,media);assert.ok(request.randomId);assert.ok(request.getBytes().length>0);dispatches++;return new Api.UpdatesTooLong();},_getResponseMessage:()=>new Api.Message({id:9,date:1700000000,message:'caption'})};
-  const reply=await sdkSendFile(fake,peer,{file:media,caption:'caption',forceDocument:kind==='document',formattingEntities:[],parseMode:false});assert.equal(reply.id,9);assert.equal(dispatches,1);
+  const fake={getInputEntity:async()=>peer,buildReplyMarkup:()=>undefined,invoke:async(request:{className:string;randomId:unknown;media:unknown;replyTo:{replyToMsgId:number};getBytes:()=>Buffer})=>{assert.equal(request.className,'messages.SendMedia');assert.equal(request.media,media);assert.equal(request.replyTo.replyToMsgId,7);assert.ok(request.randomId);assert.ok(request.getBytes().length>0);dispatches++;return new Api.UpdatesTooLong();},_getResponseMessage:()=>new Api.Message({id:9,date:1700000000,message:'caption'})};
+  const reply=await sdkSendFile(fake,peer,{file:media,caption:'caption',forceDocument:kind==='document',formattingEntities:[],parseMode:false,replyTo:7});assert.equal(reply.id,9);assert.equal(dispatches,1);
  }
 });
 

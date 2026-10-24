@@ -19,10 +19,14 @@ function messageView(message:Api.Message|Api.MessageService):InboxMessage{
 // Peer access hashes and pagination cursors remain inside the connected worker.
 export class InboxReader{
  private peers=new Map<string,Api.TypeInputPeer>();
+ private replyKey="";
+ private replyIds=new Set<number>();
  private points=new Map<string,number>();
  private cursors=new Map<string,{offsetDate:number;offsetId:number;offsetPeer:Api.TypeInputPeer}>();
+ canReply(key:string,id:number){return this.replyKey===key&&this.replyIds.has(id);}
+ private rememberReply(key:string,id:number){if(this.replyKey!==key)return;this.replyIds.add(id);this.replyIds=new Set([...this.replyIds].sort((a,b)=>b-a).slice(0,INBOX_CACHE_LIMIT));}
  inputPeer(key:string){return this.peers.get(key);}
- reset(){this.peers.clear();this.cursors.clear();this.points.clear();}
+ reset(){this.replyKey="";this.replyIds.clear();this.peers.clear();this.cursors.clear();this.points.clear();}
  update(raw:unknown):InboxUpdate|undefined{
   if(raw instanceof Api.UpdatesTooLong)return {type:'resync'};
   if(raw instanceof Api.UpdateChannelTooLong)return this.peers.has('channel:'+raw.channelId)?{type:'resync'}:{type:'changed'};
@@ -35,16 +39,17 @@ export class InboxReader{
   if(raw instanceof Api.UpdateNewMessage||raw instanceof Api.UpdateNewChannelMessage||raw instanceof Api.UpdateEditMessage||raw instanceof Api.UpdateEditChannelMessage){
    const message=raw.message;if(!(message instanceof Api.Message||message instanceof Api.MessageService))return;
    const ref=key(message.peerId);if(!this.peers.has(ref))return {type:'changed'};
+   if(message instanceof Api.Message)this.rememberReply(ref,message.id);
    return {type:'message',key:ref,message:messageView(message),edited:raw instanceof Api.UpdateEditMessage||raw instanceof Api.UpdateEditChannelMessage};
   }
   if(raw instanceof Api.UpdateShortMessage||raw instanceof Api.UpdateShortChatMessage){
    const ref=raw instanceof Api.UpdateShortMessage?'user:'+raw.userId:'chat:'+raw.chatId;
    if(!this.peers.has(ref))return {type:'changed'};
-   return {type:'message',key:ref,edited:false,message:{id:raw.id,at:timestamp(raw.date),text:raw.message,outgoing:Boolean(raw.out),kind:'text'}};
+   this.rememberReply(ref,raw.id);return {type:'message',key:ref,edited:false,message:{id:raw.id,at:timestamp(raw.date),text:raw.message,outgoing:Boolean(raw.out),kind:'text'}};
   }
-  if(raw instanceof Api.UpdateDeleteChannelMessages){if(raw.messages.length>INBOX_CACHE_LIMIT)return {type:'resync'};const ref='channel:'+raw.channelId;return this.peers.has(ref)?{type:'delete',key:ref,ids:raw.messages.slice(0,INBOX_CACHE_LIMIT)}:undefined;}
+  if(raw instanceof Api.UpdateDeleteChannelMessages){if(raw.messages.length>INBOX_CACHE_LIMIT)return {type:'resync'};const ref='channel:'+raw.channelId;if(this.replyKey===ref)for(const id of raw.messages)this.replyIds.delete(id);return this.peers.has(ref)?{type:'delete',key:ref,ids:raw.messages.slice(0,INBOX_CACHE_LIMIT)}:undefined;}
   if(raw instanceof Api.UpdateDeleteMessages&&raw.messages.length>INBOX_CACHE_LIMIT)return {type:'resync'};
-  if(raw instanceof Api.UpdateDeleteMessages)return {type:'delete',ids:raw.messages.slice(0,INBOX_CACHE_LIMIT)};
+  if(raw instanceof Api.UpdateDeleteMessages){if(!this.replyKey.startsWith('channel:'))for(const id of raw.messages)this.replyIds.delete(id);return {type:'delete',ids:raw.messages.slice(0,INBOX_CACHE_LIMIT)};}
   if(raw instanceof Api.UpdateReadHistoryInbox)return {type:'changed',key:key(raw.peer)};
   if(raw instanceof Api.UpdateReadChannelInbox)return {type:'changed',key:'channel:'+raw.channelId};
  }
@@ -56,6 +61,8 @@ export class InboxReader{
    if(result instanceof Api.messages.MessagesNotModified)throw Error('INBOX_RESPONSE_INVALID');
    const raw=result.messages.filter(m=>m.id>0&&(!action.before||m.id<action.before));
    const messages=raw.filter((m):m is Api.Message|Api.MessageService=>m instanceof Api.Message||m instanceof Api.MessageService).map(messageView);
+   if(this.replyKey!==action.key){this.replyKey=action.key;this.replyIds.clear();}
+   for(const message of raw)if(message instanceof Api.Message)this.rememberReply(action.key,message.id);
    const next=raw.length>=INBOX_PAGE_SIZE?Math.min(...raw.map(m=>m.id)):undefined;
    return {ok:true,type:'messages',key:action.key,messages,next};
   }

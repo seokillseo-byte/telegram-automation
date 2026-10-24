@@ -236,6 +236,7 @@ else app.whenReady().then(async()=>{
     if(action.type==='dialogs')return {ok:true,type:'dialogs',dialogs:[{id:'1',key:'user:1',kind:'user',name:'Hội thoại thử',username:'fixture_user',unread:1,preview:fixtureMessages[0].text,lastMessageId:fixtureMessages[0].id}]};
     return {ok:true,type:'messages',key:action.key,messages:fixtureMessages};
    });
+   const fixtureReplyTemplate=research.saveTemplate({name:'Mẫu reply kiểm thử',body:'Chào {{ten}}, sản phẩm {{san_pham}}.'});
    const fixtureStatus={state:'connected',userConnected:true,inboxOnline:true,userIdentity:{id:'1',name:'Kiểm thử',kind:'user'}};
    win.webContents.send('spike:status',fixtureStatus);
    await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,150))`);
@@ -252,10 +253,10 @@ else app.whenReady().then(async()=>{
    if(!await win.webContents.executeJavaScript(`document.querySelectorAll('.inbox-message').length===0`))throw Error('SMOKE_FAILED');
    win.webContents.send('spike:status',fixtureStatus);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,500))`);
    if(fixtureReads!==beforeReconnect+2||!await win.webContents.executeJavaScript(`document.querySelector('.inbox-message')?.textContent.includes('Đã sửa <script>')`))throw Error('SMOKE_FAILED');console.log('INBOX_RECONNECT_REFRESH_PASS');
-   let fixtureManualSends=0,fixtureManualToken=false,fixtureManualUncertain=false;
+   let fixtureManualSends=0,fixtureManualToken=false,fixtureManualUncertain=false;let fixtureReplyId:number|undefined;
    ipcMain.removeHandler('manual:action');ipcMain.handle('manual:action',(_event,input)=>{
     const action=parseManualAction(input);
-    if(action.type==='preview'){fixtureManualToken=true;return {ok:true,preview:{id:'00000000-0000-4000-8000-000000000007',recipient:fixtureStatus.userIdentity,text:action.text,expiresAt:new Date(Date.now()+300000).toISOString()}};}
+    if(action.type==='preview'){fixtureManualToken=true;fixtureReplyId=action.replyTo;return {ok:true,preview:{id:'00000000-0000-4000-8000-000000000007',recipient:fixtureStatus.userIdentity,text:action.text,reply:action.replyTo?{id:action.replyTo,text:fixtureMessages[0].text}:undefined,expiresAt:new Date(Date.now()+300000).toISOString()}};}
     if(action.type==='confirm'&&fixtureManualToken){fixtureManualToken=false;fixtureManualSends++;return fixtureManualUncertain?{ok:false,error:classifyError(Error('TIMEOUT')),uncertain:true}:{ok:true,sent:{id:77,recipient:fixtureStatus.userIdentity}};}
     return {ok:false,error:classifyError(Error('SEND_PREVIEW_EXPIRED'))};
    });
@@ -263,9 +264,26 @@ else app.whenReady().then(async()=>{
    if(!composerPreview||fixtureManualSends!==0)throw Error('SMOKE_FAILED');
    await win.webContents.executeJavaScript(`(()=>{const button=document.querySelector('[data-testid="send-confirm"]');button.click();button.click();})()`);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,150))`);
    if(Number(fixtureManualSends)!==1||!await win.webContents.executeJavaScript(`document.querySelector('[data-testid="send-text"]').value===''`))throw Error('SMOKE_FAILED');console.log('MANUAL_COMPOSER_PREVIEW_CONFIRM_PASS');
+   const replyTemplateOk=await win.webContents.executeJavaScript(`(async()=>{
+    document.querySelector('[data-testid="message-reply"]').click();await new Promise(resolve=>setTimeout(resolve,100));
+    const select=document.querySelector('[data-testid="compose-template"]');const option=[...select.options].find(option=>option.textContent==='Mẫu reply kiểm thử');if(!option)return false;
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,option.value);select.dispatchEvent(new Event('change',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,100));
+    document.querySelector('[data-testid="compose-template-apply"]').click();await new Promise(resolve=>setTimeout(resolve,100));if(document.querySelector('[data-testid="send-text"]').value!=='')return false;
+    for(const [key,value] of [['ten','Bạn thử'],['san_pham','Sản phẩm thử']]){const input=document.querySelector('[data-template-variable="'+key+'"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));}
+    await new Promise(resolve=>setTimeout(resolve,100));document.querySelector('[data-testid="compose-template-apply"]').click();await new Promise(resolve=>setTimeout(resolve,100));
+    if(document.querySelector('[data-testid="send-text"]').value!=='Chào Bạn thử, sản phẩm Sản phẩm thử.')return false;
+    document.querySelector('[data-testid="send-preview"]').click();await new Promise(resolve=>setTimeout(resolve,150));return document.querySelector('[data-testid="reply-preview"]')?.textContent.includes('#6');
+   })()`);
+   if(!replyTemplateOk||Number(fixtureManualSends)!==1||fixtureReplyId!==6)throw Error('SMOKE_FAILED');
+   await win.webContents.executeJavaScript(`document.querySelector('[data-testid="send-confirm"]').click()`);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,150))`);
+   if(Number(fixtureManualSends)!==2||!await win.webContents.executeJavaScript(`!document.querySelector('[data-testid="reply-context"]')&&document.querySelector('[data-testid="send-text"]').value===''`))throw Error('SMOKE_FAILED');console.log('REPLY_TEMPLATE_COMPOSER_PASS');
+   await win.webContents.executeJavaScript(`document.querySelector('[data-testid="message-reply"]').click()`);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,100))`);
+   win.webContents.send('inbox:update',{type:'delete',ids:[6]});await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,150))`);
+   if(!await win.webContents.executeJavaScript(`document.querySelector('[data-testid="reply-context"]')?.textContent.includes('không còn')&&document.querySelector('[data-testid="send-preview"]').disabled`))throw Error('SMOKE_FAILED');console.log('REPLY_DELETED_GUARD_PASS');
+   await win.webContents.executeJavaScript(`document.querySelector('[data-testid="reply-clear"]').click()`);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,100))`);
    fixtureManualUncertain=true;
    await win.webContents.executeJavaScript(`(async()=>{const input=document.querySelector('[data-testid="send-text"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Giữ bản soạn khi chưa rõ kết quả');input.dispatchEvent(new Event('input',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,100));document.querySelector('[data-testid="send-preview"]').click();await new Promise(resolve=>setTimeout(resolve,100));document.querySelector('[data-testid="send-confirm"]').click();await new Promise(resolve=>setTimeout(resolve,150));})()`);
-   if(Number(fixtureManualSends)!==2||!await win.webContents.executeJavaScript(`document.querySelector('[data-testid="send-text"]').value==='Giữ bản soạn khi chưa rõ kết quả'&&document.querySelector('[data-testid="send-preview"]').disabled`))throw Error('SMOKE_FAILED');console.log('MANUAL_UNCERTAIN_DRAFT_PASS');
+   if(Number(fixtureManualSends)!==3||!await win.webContents.executeJavaScript(`document.querySelector('[data-testid="send-text"]').value==='Giữ bản soạn khi chưa rõ kết quả'&&document.querySelector('[data-testid="send-preview"]').disabled`))throw Error('SMOKE_FAILED');console.log('MANUAL_UNCERTAIN_DRAFT_PASS');research.deleteTemplate(fixtureReplyTemplate);
    win.webContents.send('spike:status',{state:'disconnected',userConnected:false});
 
    const templatesOk=await win.webContents.executeJavaScript(`(async()=>{

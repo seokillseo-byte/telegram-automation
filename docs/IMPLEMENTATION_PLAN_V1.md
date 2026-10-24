@@ -228,3 +228,6 @@ Triển khai P4.2 cho phạm vi bộ nhớ đã tải: nhận và hợp nhất c
 
 ## P4.3 — 0.7.0
 Gửi thủ công một người nhận: text, một ảnh/tài liệu; xem trước/confirm, quyền cơ bản, giữ bản soạn khi lỗi và uncertain không auto retry. Không có reply/mẫu tin gắn ô soạn hoặc queue/lịch. Xem MANUAL_SEND_V0.7.md để nghiệm thu gửi thật.
+
+## P4.4 — 0.8.0
+Reply tin cụ thể trong hội thoại đã tải; gắn đúng peer/ID, preview/confirm kiểm tra lại tin gốc. Đưa mẫu đã lưu và biến vào Composer, giữ mẫu gốc và quy tắc xử lý lỗi của 0.7. Xem REPLY_TEMPLATES_V0.8.md. P4.5 và nghiệm thu gửi thật còn trước Phase 5.

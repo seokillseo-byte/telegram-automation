@@ -21,3 +21,8 @@ export function previewTemplate(body:string,values:Partial<Record<TemplateVariab
  // A replacement callback preserves literal dollar signs and does not recursively expand values.
  return {text:body.replace(/\{\{\s*([a-z_]+)\s*\}\}/g,(original,key:TemplateVariable)=>values[key]?.trim()?values[key]:original),missing};
 }
+
+export function composeTemplate(body:string,values:Partial<Record<TemplateVariable,string>>,maxLength=4096):string{
+ const result=previewTemplate(body,values);if(result.missing.length)throw Error('TEMPLATE_VALUES_REQUIRED');
+ if(!result.text.trim()||result.text.length>maxLength)throw Error('TEMPLATE_CONTENT_TOO_LONG');return result.text;
+}

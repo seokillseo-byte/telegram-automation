@@ -47,3 +47,7 @@ Nhận cập nhật cho hội thoại đã tải, hợp nhất tin mới/sửa/x
 ## Gửi thủ công P4.3 — 0.7.0
 
 Saved Messages, hội thoại hoặc username chính xác; text, ảnh/tài liệu có preview và xác nhận một lần. Lỗi giữ bản soạn, uncertain không tự gửi lại. Xem [hướng dẫn test](docs/MANUAL_SEND_V0.7.md).
+
+## Reply và mẫu tin P4.4 — 0.8.0
+
+Trả lời tin đã tải trong đúng hội thoại; dùng mẫu đã lưu và điền biến trong Composer. Vẫn phải preview/confirm; kiểm tra tin gốc xóa/sửa trước dispatch. Xem [hướng dẫn nghiệm thu](docs/REPLY_TEMPLATES_V0.8.md).
