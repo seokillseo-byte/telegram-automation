@@ -1,7 +1,8 @@
+import {parseAppAction,type AppReply} from '../../../../packages/shared/src/app-state';
 import {app,BrowserWindow,ipcMain,safeStorage,dialog} from 'electron';
 import {Worker} from 'node:worker_threads';
 import {join,basename} from 'node:path';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {pathToFileURL} from 'node:url';
 import {Vault} from './vault';
@@ -27,7 +28,8 @@ let generation=0;
 let encryption=false;
 let latest:Status={state:'disconnected'};
 const page=pathToFileURL(join(__dirname,'index.html')).href;
-function emit(status:Status){latest={...status,encryption,userIdentity,userConnected:Boolean(userIdentity&&worker)};if(win&&!win.isDestroyed())win.webContents.send('spike:status',latest);}
+let lastEvent='';
+function emit(status:Status){if(status.state!==lastEvent){try{research?.addEvent(status.state);}catch{/* logging must not interrupt Telegram */}lastEvent=status.state;}latest={...status,encryption,userIdentity,userConnected:Boolean(userIdentity&&worker)};if(win&&!win.isDestroyed())win.webContents.send('spike:status',latest);}
 function stopWatch(){clearTimeout(watchdog);watchdog=undefined;}
 async function stopWorker(keepBusy=false){stopWatch();const previous=worker;worker=undefined;userIdentity=undefined;currentResults=[];if(!keepBusy)busy=false;if(previous)await previous.terminate();}
 function startWatch(){stopWatch();watchdog=setTimeout(()=>{void stopWorker().then(()=>emit({state:'error',error:classifyError(Error('TIMEOUT'))}));},90000);}
@@ -62,13 +64,32 @@ if(!app.requestSingleInstanceLock())app.quit();
 else app.whenReady().then(async()=>{
  encryption=process.platform==='win32'&&await safeStorage.isAsyncEncryptionAvailable();
  vault=new Vault(app.getPath('userData'),{available:async()=>encryption,encrypt:value=>safeStorage.encryptStringAsync(value),decrypt:async value=>(await safeStorage.decryptStringAsync(value)).result});
- research=new ResearchStore(join(app.getPath('userData'),'industry-research.sqlite'));researchScope=research.lastAccount();
+ research=new ResearchStore(join(app.getPath('userData'),'industry-research.sqlite'));researchScope=research.lastAccount();research.addEvent('app_started');
  win=new BrowserWindow({width:1100,height:850,minWidth:760,minHeight:600,webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  win.removeMenu();
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  win.webContents.on('will-navigate',(event,url)=>{if(url!==page)event.preventDefault();});
  win.webContents.session.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
  win.webContents.session.webRequest.onBeforeRequest((details,callback)=>callback({cancel:!details.url.startsWith(pathToFileURL(__dirname).href+'/')}));
+ ipcMain.handle('app:action',async(event,input):Promise<AppReply>=>{
+  if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
+  try{
+   const action=parseAppAction(input);
+   if(action.type==='savePreferences')research.savePreferences(action.preferences);
+   if(action.type==='clearLogs')research.clearEvents();
+   if(action.type==='exportLogs'){
+    if(exporting)throw Error('BUSY');exporting=true;
+    try{
+     const events=research.appSnapshot(researchScope).events;
+     const chosen=await dialog.showSaveDialog(win,{title:'Xuất nhật ký hỗ trợ',defaultPath:join(app.getPath('documents'),'Telegram-App-Logs.json'),filters:[{name:'JSON',extensions:['json']}]});
+     if(chosen.canceled||!chosen.filePath)return {ok:true,cancelled:true};
+     const file=chosen.filePath.toLowerCase().endsWith('.json')?chosen.filePath:chosen.filePath+'.json';
+     await writeFile(file,JSON.stringify({version:app.getVersion(),events},null,2));return {ok:true,fileName:basename(file)};
+    }finally{exporting=false;}
+   }
+   return {ok:true,snapshot:research.appSnapshot(researchScope)};
+  }catch(error){return {ok:false,error:classifyError(error).message};}
+ });
  ipcMain.handle('analysis:action',async(event,input):Promise<AnalysisResponse>=>{
   if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
   try{
@@ -151,8 +172,10 @@ else app.whenReady().then(async()=>{
  await win.loadFile(join(__dirname,'index.html'));
  if(process.argv.includes('--smoke-test')){
   try{
-   const ok=await win.webContents.executeJavaScript(`new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{const ready=document.querySelector('h1')?.textContent.includes('Nghiên cứu ngành') && typeof window.spike?.action === 'function' && typeof window.spike?.analysis === 'function' && document.querySelector('nav')?.textContent.includes('Phân tích nhóm/kênh') && typeof require === 'undefined';if(ready||++attempts>=50){clearInterval(timer);resolve(Boolean(ready));}},100);})`);
+   const ok=await win.webContents.executeJavaScript(`new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{const ready=document.querySelector('h1')?.textContent.includes('Telegram Automation') && typeof window.spike?.action === 'function' && typeof window.spike?.analysis === 'function' && typeof window.spike?.app === 'function' && document.querySelector('nav')?.textContent.includes('Phân tích nhóm/kênh') && typeof require === 'undefined';if(ready||++attempts>=50){clearInterval(timer);resolve(Boolean(ready));}},100);})`);
    if(!ok)throw Error('SMOKE_FAILED');
+   const navigationOk=await win.webContents.executeJavaScript(`(async()=>{const buttons=[...document.querySelectorAll('nav button')];if(buttons.length!==11)return false;for(const button of buttons){button.click();await new Promise(resolve=>setTimeout(resolve,100));if(document.querySelector('.workspace')?.dataset.page!==button.dataset.page)return false;}return true;})()`);
+   if(!navigationOk)throw Error('SMOKE_FAILED');console.log('PHASE1_NAVIGATION_PASS');
    if(process.platform==='win32'){
     if(!encryption)throw Error('ENCRYPTION_UNAVAILABLE');
     const directory=await mkdtemp(join(tmpdir(),'telegram-dpapi-'));
@@ -180,7 +203,9 @@ else app.whenReady().then(async()=>{
     if(snapshot.records.length!==1||snapshot.records[0].note!=='Ghi chú thử')throw Error('RESEARCH_ERROR');
     const workbook=await toWorkbook(snapshot.records,'1');if(workbook[0]!==80||workbook[1]!==75)throw Error('EXPORT_ERROR');
     const report:GroupReport={id:'00000000-0000-4000-8000-000000000001',target:'research_demo',username:'research_demo',groupId:'12345678901234567',title:'Kênh thử',kind:'channel',about:'Mẫu kiểm chứng',members:null,analyzedAt:new Date().toISOString(),sampleLimit:100,fetched:1,historyStatus:'available',mayBeTruncated:false,warnings:[],...aggregateSample([{id:1,date:1700000000,text:'Nghiên cứu',views:5}])};
+    probeStore.savePreferences({timeZone:'UTC',compact:true,startPage:'overview'});probeStore.addEvent('connected');
     probeStore.saveGroupReport('1',report);probeStore.close();probeStore=new ResearchStore(file);
+    if(probeStore.preferences().timeZone!=='UTC'||!probeStore.appSnapshot('1').events.length)throw Error('RESEARCH_ERROR');console.log('PHASE1_SETTINGS_LOGS_PASS');
     const reports=probeStore.listGroupReports('1');if(reports.length!==1||reports[0].metrics.views.total!==5)throw Error('RESEARCH_ERROR');
     const analysisBook=await groupWorkbook(reports);if(analysisBook[0]!==80||analysisBook[1]!==75)throw Error('EXPORT_ERROR');
     probeStore.close();console.log('GROUP_ANALYSIS_SQLITE_XLSX_PASS');console.log('RESEARCH_SQLITE_XLSX_PASS');
@@ -188,6 +213,6 @@ else app.whenReady().then(async()=>{
    console.log('PHASE0_SMOKE_PASS');app.exit(0);
   }catch(error){console.error('PHASE0_SMOKE_FAIL',classifyError(error).code);app.exit(1);}
  }
-}).catch(()=>{console.error('APP_START_FAILED');app.exit(1);});
+}).catch(error=>{console.error('APP_START_FAILED',classifyError(error).code);if(!process.argv.includes('--smoke-test'))dialog.showErrorBox('Không thể mở ứng dụng',classifyError(error).message);app.exit(1);});
 app.on('window-all-closed',()=>app.quit());
 app.on('before-quit',()=>{void stopWorker();research?.close();});

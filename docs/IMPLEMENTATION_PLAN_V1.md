@@ -213,3 +213,6 @@ Bản 0.1.0 đưa một phần SQLite và tìm kiếm/lưu/xuất của Phase 1/
 
 ## Module phân tích nhóm/kênh công khai 0.2.0
 Theo phạm vi được người dùng chấp nhận: bổ sung thống kê nhóm/kênh ở cấp tổng hợp, mẫu tối đa 100 mục lịch sử, lưu snapshot và xuất Excel; không thu danh sách thành viên hoặc người tương tác. Xem GROUP_CHANNEL_ANALYSIS_V0.2.md. Đây là phần mở rộng nghiên cứu, không đánh dấu hoàn thành các phase automation/marketing.
+
+## Phase 1 implementation — 0.3.0
+Đã triển khai khung 11 màn, cấu hình SQLite, nhật ký sự kiện allowlist, quản lý schema và kiểm tra compiler/test/Windows. Hộp thư/mẫu tin/lịch gửi chưa khả dụng theo phase đã định. Xem PHASE1_FOUNDATION.md để nghiệm thu T01–T02 trước khi coi Phase 1 hoàn tất.

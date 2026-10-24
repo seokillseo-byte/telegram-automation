@@ -1,0 +1,19 @@
+export type Preferences={timeZone:string;compact:boolean;startPage:'overview'|'account'|'research'|'analytics'};
+export const DEFAULT_PREFERENCES:Preferences={timeZone:'Asia/Ho_Chi_Minh',compact:false,startPage:'overview'};
+export type AppEvent={id:number;at:string;level:'info'|'error';event:string};
+export type AppSnapshot={preferences:Preferences;events:AppEvent[];counts:{saved:number;searches:number;reports:number}};
+export type AppAction={type:'get'}|{type:'savePreferences';preferences:Preferences}|{type:'exportLogs'}|{type:'clearLogs'};
+export type AppReply={ok:true;snapshot?:AppSnapshot;fileName?:string;cancelled?:boolean}|{ok:false;error:string};
+export const EVENT_LABELS:Record<string,string>={app_started:'Ứng dụng đã mở',connecting:'Đang kết nối Telegram',connected:'Phiên người dùng đã xác thực',disconnected:'Đã ngắt kết nối',searching:'Đang tìm kiếm',search_complete:'Tìm kiếm hoàn tất',analyzing_group:'Đang phân tích nhóm/kênh',group_analysis_complete:'Đã lưu báo cáo nhóm/kênh',error:'Thao tác gặp lỗi',settings_saved:'Đã lưu cài đặt',logs_cleared:'Đã xóa nhật ký',other:'Sự kiện hệ thống'};
+export function parsePreferences(value:unknown):Preferences{
+ if(!value||typeof value!=='object')throw Error('INPUT_INVALID');const v=value as Record<string,unknown>;
+ if(Object.keys(v).some(key=>!['timeZone','compact','startPage'].includes(key))||typeof v.timeZone!=='string'||v.timeZone.length>80||typeof v.compact!=='boolean'||!['overview','account','research','analytics'].includes(String(v.startPage)))throw Error('INPUT_INVALID');
+ try{new Intl.DateTimeFormat('vi-VN',{timeZone:v.timeZone}).format();}catch{throw Error('INPUT_INVALID');}
+ return {timeZone:v.timeZone,compact:v.compact,startPage:v.startPage as Preferences['startPage']};
+}
+export function parseAppAction(value:unknown):AppAction{
+ if(!value||typeof value!=='object')throw Error('INPUT_INVALID');const v=value as Record<string,unknown>;
+ if(v.type==='savePreferences')return {type:v.type,preferences:parsePreferences(v.preferences)};
+ if(v.type==='get'||v.type==='exportLogs'||v.type==='clearLogs')return {type:v.type};throw Error('INPUT_INVALID');
+}
+export function formatAppTime(value:string,timeZone:string):string{return new Intl.DateTimeFormat('vi-VN',{timeZone,dateStyle:'short',timeStyle:'medium'}).format(new Date(value));}

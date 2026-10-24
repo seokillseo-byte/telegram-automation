@@ -1,8 +1,10 @@
 import {contextBridge,ipcRenderer} from 'electron';
+import type {AppAction} from '../../../../packages/shared/src/app-state';
 import type {Action,Status} from '../../../../packages/shared/src/protocol';
 import type {AnalysisAction} from '../../../../packages/shared/src/group-analysis';
 import type {ResearchAction} from '../../../../packages/shared/src/research';
 contextBridge.exposeInMainWorld('spike',{
+ app:(action:AppAction)=>ipcRenderer.invoke('app:action',action),
  action:(action:Action)=>ipcRenderer.invoke('spike:action',action),
  analysis:(action:AnalysisAction)=>ipcRenderer.invoke('analysis:action',action),
  research:(action:ResearchAction)=>ipcRenderer.invoke('research:action',action),
