@@ -4,8 +4,8 @@ export type ScheduledPeer={type:'self'}|{type:'user'|'channel';id:string;accessH
 export type ScheduledPayload={accountId:string;recipient:Identity;peer:ScheduledPeer;text:string;randomId:string;purpose:'personal'};
 export type QueueJob={id:string;accountId:string;recipient:Identity;dueAt:string;zone:string;createdAt:string;state:JobState;attempts:number;nextAttemptAt?:string;remoteId?:number;errorCode?:string};
 export type QueueEvent={at:string;state:JobState;code?:string};
-export type QueueAction={type:'list'}|{type:'detail';id:string}|{type:'pause'|'resume'|'cancel';id:string}|{type:'reschedule';id:string;dueAt:string;zone:string};
-export type QueueReply={ok:true;jobs?:QueueJob[];detail?:{job:QueueJob;text:string;events:QueueEvent[]}}|{ok:false;error:string};
+export type QueueAction={type:'list';reviewOnly?:boolean}|{type:'detail';id:string}|{type:'pause'|'resume'|'cancel';id:string}|{type:'reschedule';id:string;dueAt:string;zone:string};
+export type QueueReply={ok:true;jobs?:QueueJob[];summary?:{needsReview:number;uncertain:number};detail?:{job:QueueJob;text:string;events:QueueEvent[]}}|{ok:false;error:string};
 export const QUEUE_GRACE_MS=5000;
 export function queueId(value:unknown):string{if(typeof value!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))throw Error('INPUT_INVALID');return value;}
 export function scheduleTime(dueAt:unknown,zone:unknown,now=Date.now()):{dueAt:string;zone:string}{
@@ -21,7 +21,7 @@ export function localScheduleToUtc(value:string,zone:string,now=Date.now()):stri
 }
 export function parseQueueAction(value:unknown):QueueAction{
  if(!value||typeof value!=='object')throw Error('INPUT_INVALID');const v=value as Record<string,unknown>;
- if(v.type==='list'&&Object.keys(v).length===1)return {type:'list'};
+ if(v.type==='list'&&Object.keys(v).every(k=>['type','reviewOnly'].includes(k))&&(v.reviewOnly===undefined||typeof v.reviewOnly==='boolean'))return {type:'list',reviewOnly:v.reviewOnly as boolean|undefined};
  if(v.type==='reschedule'&&Object.keys(v).length===4)return {type:v.type,id:queueId(v.id),...scheduleTime(v.dueAt,v.zone)};
  if(['detail','pause','resume','cancel'].includes(String(v.type))&&Object.keys(v).length===2)return {type:v.type as 'detail'|'pause'|'resume'|'cancel',id:queueId(v.id)};throw Error('INPUT_INVALID');
 }
@@ -33,7 +33,7 @@ export function parseScheduledPayload(value:unknown):ScheduledPayload{
 }
 
 export function utcToScheduleLocal(at:number,zone:string):string{const p=zoneParts(at,zone),pad=(n:number)=>String(n).padStart(2,'0');return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;}
-export const JOB_LABELS:Record<JobState,string>={pending:'Chờ đến giờ',retry_wait:'Chờ thử lại',paused:'Tạm dừng',running:'Đang thực thi',sent:'Telegram đã xác nhận',failed:'Thất bại',uncertain:'Chưa rõ kết quả',needs_review:'Cần kiểm tra giờ mới',cancelled:'Đã hủy'};
+export const JOB_LABELS:Record<JobState,string>={pending:'Chờ đến giờ',retry_wait:'Chờ thử lại',paused:'Tạm dừng',running:'Đang thực thi',sent:'Telegram đã xác nhận',failed:'Thất bại',uncertain:'Chưa rõ kết quả',needs_review:'Cần kiểm tra',cancelled:'Đã hủy'};
 
 export const QUEUE_MAX_ATTEMPTS=3;
 // Only explicit rejection or failure before SendMessage may be retried.
@@ -42,4 +42,12 @@ export function queueRetry(error:{code:string;retryAfter?:number},uncertain:bool
  const wait=error.retryAfter;
  if(error.code==='RATE_LIMIT'&&typeof wait==='number'&&Number.isFinite(wait)&&wait>0&&wait<=86400)return new Date(now+Math.ceil(wait)*1000+1000).toISOString();
  if(['TIMEOUT','NETWORK_TIMEOUT','ETIMEDOUT','ESOCKETTIMEDOUT','ECONNRESET','ECONNREFUSED','ENETUNREACH','EHOSTUNREACH','EAI_AGAIN','ENOTFOUND','CONNECTION_FAILED'].includes(error.code))return new Date(now+(attempts===1?30000:120000)).toISOString();
+}
+
+export function queueRecoveryHelp(job:QueueJob):string{
+ const reasons:Record<string,string>={QUEUE_APP_RESTART:'Ứng dụng mở lại sau giờ hẹn.',QUEUE_INTERRUPTED:'Ứng dụng dừng khi lượt gửi đang thực thi.',QUEUE_APP_CLOSED:'Ứng dụng đóng khi lượt gửi đang thực thi.',QUEUE_SLEEP:'Máy chuyển sang sleep khi lượt gửi đang thực thi.',QUEUE_RESUMED:'Giờ hẹn đã qua khi máy sleep.',QUEUE_CONNECTION_LOST:'Kết nối bị gián đoạn.',QUEUE_RECONNECTED:'Giờ hẹn đã qua trong lúc mất kết nối.',QUEUE_TIMER_GAP:'Bộ hẹn giờ bị gián đoạn hoặc máy tạm ngừng hoạt động.',QUEUE_CLOCK_CHANGED:'Đồng hồ hệ thống thay đổi; cần kiểm tra lại giờ hẹn.',QUEUE_DISPATCH_EXPIRED:'Lượt gửi hết hạn trước khi gọi lệnh gửi.',QUEUE_OVERDUE:'Lịch đã quá giờ thực thi.'};
+ const reason=reasons[job.errorCode??'']??'';
+ if(job.state==='uncertain')return reason+' Chưa biết Telegram đã nhận tin hay chưa. Kiểm tra hội thoại trên Telegram; lịch này sẽ không tự gửi lại.';
+ if(job.state==='needs_review')return reason+(job.attempts===0?' Lượt này chưa được gửi. Chọn giờ mới và xác nhận, hoặc hủy lịch.':' Các lần trước đã được thử. Kiểm tra Telegram và hủy lịch này trước khi chủ động tạo lịch khác.');
+ return reason;
 }

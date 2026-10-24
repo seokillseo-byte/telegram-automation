@@ -240,3 +240,6 @@ Người dùng xác nhận gửi thủ công thành công đến tài khoản th
 
 ### P5.3 · 0.11.0
 Thử lại có phân loại cho lịch văn bản cá nhân: tối đa 3 lần, FloodWait theo server và cooldown lưu theo tài khoản; lỗi mạng chỉ tự thử lại trước dispatch. Sau dispatch mất ACK/mạng luôn cần kiểm tra, không tự thử lại. Có pause/resume/cancel cho retry đang chờ; lưu next_attempt_at và lịch sử trạng thái. SDK SendMessage của lịch chỉ một request attempt. [Tiêu chí và test](QUEUE_RETRY_V0.11.md). P5.4 phục hồi tiếp tục nghiệm thu; P5.5 chưa triển khai.
+
+### P5.4 · 0.12.0
+Phục hồi crash/sleep/mất kết nối và màn review. QueueRunner vô hiệu hóa lượt sau gián đoạn, kiểm tra lại sau decrypt, worker kiểm tra hạn trước SendMessage; runId ngăn kết quả cũ ghi đè lượt mới. Lịch quá giờ cần review, lượt đã chuyển worker thành uncertain khi gián đoạn. Có số đếm/bộ lọc review, lý do và xác nhận giờ mới chỉ khi chưa thử. [Nghiệm thu và hướng dẫn test](QUEUE_RECOVERY_V0.12.md). Test crash kill child process và SQLite thật; sleep/network/clock dùng fixture. Chưa nghiệm thu live 0.12. Tiếp theo P5.5 consent/suppression.
