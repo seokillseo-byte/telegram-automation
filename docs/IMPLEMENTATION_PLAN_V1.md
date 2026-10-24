@@ -222,3 +222,6 @@ Triển khai riêng phần mẫu tin của P4.4 để dùng offline trong lúc c
 
 ## Hộp thư chỉ đọc — 0.5.0
 Bước tiếp theo đã thống nhất: P4.1 danh sách hội thoại và lịch sử có phân trang, giới hạn giữ tạm trong bộ nhớ, không ghi nội dung xuống đĩa. P4.2 cập nhật thời gian thực và P4.3 gửi tin chưa triển khai; không bổ sung tính năng ngoài bước đọc. Xem INBOX_READ_V0.5.md để nghiệm thu.
+
+## Hộp thư trực tiếp — 0.6.0
+Triển khai P4.2 cho phạm vi bộ nhớ đã tải: nhận và hợp nhất cập nhật, snapshot đối chiếu có giới hạn sau reconnect/khôi phục phiên. Không đồng bộ toàn bộ lịch sử hoặc cam kết không mất mọi sự kiện. Chưa triển khai P4.3 gửi tin. Xem INBOX_LIVE_V0.6.md.
