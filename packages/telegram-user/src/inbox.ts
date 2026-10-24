@@ -21,6 +21,7 @@ export class InboxReader{
  private peers=new Map<string,Api.TypeInputPeer>();
  private points=new Map<string,number>();
  private cursors=new Map<string,{offsetDate:number;offsetId:number;offsetPeer:Api.TypeInputPeer}>();
+ inputPeer(key:string){return this.peers.get(key);}
  reset(){this.peers.clear();this.cursors.clear();this.points.clear();}
  update(raw:unknown):InboxUpdate|undefined{
   if(raw instanceof Api.UpdatesTooLong)return {type:'resync'};

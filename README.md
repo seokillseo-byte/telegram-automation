@@ -43,3 +43,7 @@ Danh sách hội thoại và lịch sử có phân trang, lọc danh sách đã 
 ## Hộp thư cập nhật trực tiếp 0.6.0
 
 Nhận cập nhật cho hội thoại đã tải, hợp nhất tin mới/sửa/xóa, đối chiếu snapshot gần nhất khi khôi phục kết nối, sửa lọc @username. Chưa có gửi tin. Xem [hướng dẫn nghiệm thu](docs/INBOX_LIVE_V0.6.md).
+
+## Gửi thủ công P4.3 — 0.7.0
+
+Saved Messages, hội thoại hoặc username chính xác; text, ảnh/tài liệu có preview và xác nhận một lần. Lỗi giữ bản soạn, uncertain không tự gửi lại. Xem [hướng dẫn test](docs/MANUAL_SEND_V0.7.md).

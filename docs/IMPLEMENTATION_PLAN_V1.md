@@ -225,3 +225,6 @@ Bước tiếp theo đã thống nhất: P4.1 danh sách hội thoại và lịc
 
 ## Hộp thư trực tiếp — 0.6.0
 Triển khai P4.2 cho phạm vi bộ nhớ đã tải: nhận và hợp nhất cập nhật, snapshot đối chiếu có giới hạn sau reconnect/khôi phục phiên. Không đồng bộ toàn bộ lịch sử hoặc cam kết không mất mọi sự kiện. Chưa triển khai P4.3 gửi tin. Xem INBOX_LIVE_V0.6.md.
+
+## P4.3 — 0.7.0
+Gửi thủ công một người nhận: text, một ảnh/tài liệu; xem trước/confirm, quyền cơ bản, giữ bản soạn khi lỗi và uncertain không auto retry. Không có reply/mẫu tin gắn ô soạn hoặc queue/lịch. Xem MANUAL_SEND_V0.7.md để nghiệm thu gửi thật.
