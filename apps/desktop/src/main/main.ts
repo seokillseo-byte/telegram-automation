@@ -1,8 +1,10 @@
+import {parseQueueAction,parseScheduledPayload,scheduleTime,type QueueReply,type QueueJob} from '../../../../packages/shared/src/queue';
+import {QueueStore} from './queue-store';
 import {parseManualAction,type ManualReply,type AttachmentData} from '../../../../packages/shared/src/manual-send';
 import {readSendAttachment} from './send-attachment';
 import {parseInboxAction,type InboxReply} from '../../../../packages/shared/src/inbox';
 import {parseAppAction,type AppReply} from '../../../../packages/shared/src/app-state';
-import {app,BrowserWindow,ipcMain,safeStorage,dialog} from 'electron';
+import {app,BrowserWindow,ipcMain,safeStorage,dialog,powerMonitor} from 'electron';
 import {Worker} from 'node:worker_threads';
 import {join,basename} from 'node:path';
 import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
@@ -22,6 +24,11 @@ let worker:Worker|undefined;
 let watchdog:NodeJS.Timeout|undefined;
 let vault:Vault;
 let research:ResearchStore;
+let queue:QueueStore;
+let queueTimer:NodeJS.Timeout|undefined;
+let queueFlight:{job:QueueJob;dispatched:boolean}|undefined;
+let lastQueueTick=Date.now();
+let suspended=false;
 let researchScope='';
 let currentResults:ResearchPeer[]=[];
 let userIdentity:Identity|undefined;
@@ -31,6 +38,7 @@ let busy=false;
 let manualFile:AttachmentData|undefined;
 let pendingManual:((reply:ManualReply)=>void)|undefined;
 let manualDispatch=false;
+let pendingSchedule:{id:string;dueAt:string;zone:string;accountId:string}|undefined;
 let pendingInbox:((reply:InboxReply)=>void)|undefined;
 let generation=0;
 let encryption=false;
@@ -38,17 +46,47 @@ let latest:Status={state:'disconnected'};
 const page=pathToFileURL(join(__dirname,'index.html')).href;
 let lastEvent='';
 function emit(status:Status){if(status.state!==lastEvent){try{research?.addEvent(status.state);}catch{/* logging must not interrupt Telegram */}lastEvent=status.state;}latest={...status,encryption,userIdentity,userConnected:Boolean(userIdentity&&worker),inboxOnline:userIdentity?inboxOnline:undefined};if(win&&!win.isDestroyed())win.webContents.send('spike:status',latest);}
+async function decryptJob(bytes:Buffer){if(!encryption)throw Error('ENCRYPTION_UNAVAILABLE');try{return parseScheduledPayload(JSON.parse((await safeStorage.decryptStringAsync(bytes)).result));}catch{throw Error('QUEUE_PAYLOAD_INVALID');}}
+async function dispatchQueue(){
+ const now=Date.now(),gap=now-lastQueueTick;lastQueueTick=now;
+ try{
+  queue.overdue(now,gap>5000||gap<0?0:5000);
+  if(suspended||busy||queueFlight||!worker||!userIdentity||!inboxOnline)return;
+  const job=queue.claim(userIdentity.id,now);if(!job)return;const flight={job,dispatched:false};queueFlight=flight;busy=true;const epoch=generation;
+  try{
+   const payload=await decryptJob(queue.detail(job.accountId,job.id).payload);
+   if(queueFlight!==flight||epoch!==generation||!worker||!userIdentity)return;
+   if(payload.accountId!==job.accountId||payload.recipient.id!==job.recipient.id||payload.recipient.peerType!==job.recipient.peerType)throw Error('QUEUE_PAYLOAD_INVALID');
+   flight.dispatched=true;emit({state:'queue_sending'});startWatch();worker.postMessage({type:'scheduled',id:job.id,payload});
+  }catch(error){if(queueFlight===flight){queue.finish(job.accountId,job.id,flight.dispatched?'uncertain':'failed',classifyError(error).code);queueFlight=undefined;busy=false;stopWatch();emit({state:'error',error:classifyError(error)});}}
+ }catch{emit({state:'error',error:classifyError(Error('QUEUE_STORE_ERROR'))});}
+}
 function stopWatch(){clearTimeout(watchdog);watchdog=undefined;}
-async function stopWorker(keepBusy=false,inboxError='CANCELLED'){generation++;stopWatch();manualFile=undefined;if(pendingManual){pendingManual({ok:false,error:classifyError(Error(inboxError)),uncertain:manualDispatch});pendingManual=undefined;}manualDispatch=false;if(pendingInbox){pendingInbox({ok:false,error:classifyError(Error(inboxError))});pendingInbox=undefined;}inboxOnline=false;const previous=worker;worker=undefined;userIdentity=undefined;currentResults=[];if(!keepBusy)busy=false;if(previous)await previous.terminate();}
+async function stopWorker(keepBusy=false,inboxError='CANCELLED'){generation++;stopWatch();if(queueFlight){try{queue.finish(queueFlight.job.accountId,queueFlight.job.id,queueFlight.dispatched?'uncertain':'failed',inboxError);}catch{/* recover running jobs on restart */}queueFlight=undefined;}manualFile=undefined;pendingSchedule=undefined;if(pendingManual){pendingManual({ok:false,error:classifyError(Error(inboxError)),uncertain:manualDispatch});pendingManual=undefined;}manualDispatch=false;if(pendingInbox){pendingInbox({ok:false,error:classifyError(Error(inboxError))});pendingInbox=undefined;}inboxOnline=false;const previous=worker;worker=undefined;userIdentity=undefined;currentResults=[];if(!keepBusy)busy=false;if(previous)await previous.terminate();}
 function startWatch(milliseconds=90000){stopWatch();watchdog=setTimeout(()=>{void stopWorker(false,'TIMEOUT').then(()=>emit({state:'error',error:classifyError(Error('TIMEOUT'))}));},milliseconds);}
 function getWorker(){
  if(worker)return worker;
  const current=new Worker(join(__dirname,'worker.cjs'));worker=current;
  current.on('message',async message=>{
   if(worker!==current)return;
-  if(message.kind==='inbox_update'){if(!userIdentity)return;if(message.update.type==='connection'){inboxOnline=message.update.connected;latest={...latest,inboxOnline};win.webContents.send('spike:status',latest);}win.webContents.send('inbox:update',message.update);return;}
+  if(message.kind==='inbox_update'){if(!userIdentity)return;if(message.update.type==='connection'){if(message.update.connected&&!inboxOnline)queue.overdue(Date.now(),0);inboxOnline=message.update.connected;latest={...latest,inboxOnline};win.webContents.send('spike:status',latest);}win.webContents.send('inbox:update',message.update);return;}
+  if(message.kind==='queue_result'&&(!queueFlight||queueFlight.job.id!==message.id))return;
+  if(message.kind==='schedule_ready'&&!pendingSchedule)return;
   stopWatch();
-  if(message.kind==='manual'){const resolve=pendingManual;pendingManual=undefined;manualDispatch=false;busy=false;if(!message.reply.ok&&['NOT_CONNECTED','AUTH_KEY_UNREGISTERED','SESSION_REVOKED','SESSION_EXPIRED'].includes(message.reply.error.code))await stopWorker(false,message.reply.error.code);emit(message.reply.ok?{state:'manual_ready'}:{state:'error',error:message.reply.error});resolve?.(message.reply);return;}
+  if(message.kind==='schedule_ready'){
+   const resolve=pendingManual,epoch=generation,confirmation=pendingSchedule!;
+   try{
+    if(!encryption||!userIdentity)throw Error('ENCRYPTION_UNAVAILABLE');const payload=parseScheduledPayload(message.payload);if(payload.accountId!==userIdentity.id||payload.accountId!==confirmation.accountId||message.previewId!==confirmation.id)throw Error('QUEUE_ACCOUNT_MISMATCH');
+    const ciphertext=await safeStorage.encryptStringAsync(JSON.stringify(payload));if(worker!==current||epoch!==generation)return;
+    const time=scheduleTime(confirmation.dueAt,confirmation.zone),job=queue.create(payload.accountId,confirmation.id,payload.recipient,time.dueAt,time.zone,ciphertext);
+    pendingManual=undefined;pendingSchedule=undefined;busy=false;emit({state:'queue_ready'});resolve?.({ok:true,scheduled:{id:job.id,dueAt:job.dueAt,zone:job.zone}});
+   }catch(error){if(worker!==current||epoch!==generation)return;pendingManual=undefined;pendingSchedule=undefined;busy=false;emit({state:'error',error:classifyError(error)});resolve?.({ok:false,error:classifyError(error)});}return;
+  }
+  if(message.kind==='queue_result'){
+   const flight=queueFlight;if(!flight||flight.job.id!==message.id)return;
+   try{const reply=message.reply;queue.finish(flight.job.accountId,flight.job.id,reply.ok&&reply.sent?'sent':!reply.ok&&reply.uncertain?'uncertain':'failed',!reply.ok?reply.error.code:undefined,reply.ok?reply.sent?.id:undefined);emit({state:'queue_ready'});}catch{emit({state:'error',error:classifyError(Error('QUEUE_STORE_ERROR'))});}finally{queueFlight=undefined;busy=false;}return;
+  }
+  if(message.kind==='manual'){const resolve=pendingManual;pendingManual=undefined;pendingSchedule=undefined;manualDispatch=false;busy=false;if(!message.reply.ok&&['NOT_CONNECTED','AUTH_KEY_UNREGISTERED','SESSION_REVOKED','SESSION_EXPIRED'].includes(message.reply.error.code))await stopWorker(false,message.reply.error.code);emit(message.reply.ok?{state:'manual_ready'}:{state:'error',error:message.reply.error});resolve?.(message.reply);return;}
   if(message.kind==='inbox'){
    if(!message.reply.ok&&['NOT_CONNECTED','AUTH_KEY_UNREGISTERED','SESSION_REVOKED','SESSION_EXPIRED'].includes(message.reply.error.code)){await stopWorker(false,message.reply.error.code);emit({state:'error',error:message.reply.error});return;}
    const resolve=pendingInbox;pendingInbox=undefined;busy=false;emit(message.reply.ok?{state:'inbox_ready'}:{state:'error',error:message.reply.error});resolve?.(message.reply);return;
@@ -67,7 +105,7 @@ function getWorker(){
    if(['awaiting_code','awaiting_password'].includes(message.status.state)){startWatch();}else if(['searching','connecting','analyzing_group'].includes(message.status.state)){startWatch();}else{busy=false;}
    emit(message.status);
   } else if(message.kind==='session'){
-   try{await vault.save(message.value);if(worker!==current)return;busy=false;inboxOnline=true;userIdentity=message.identity;researchScope=message.identity.id;research.setAccount(researchScope);emit({state:'connected',identity:message.identity});}catch(error){await stopWorker();emit({state:'error',error:classifyError(error)});}
+   try{await vault.save(message.value);if(worker!==current)return;busy=false;inboxOnline=true;userIdentity=message.identity;researchScope=message.identity.id;research.setAccount(researchScope);queue.overdue(Date.now(),0);emit({state:'connected',identity:message.identity});}catch(error){await stopWorker();emit({state:'error',error:classifyError(error)});}
   } else if(message.kind==='logged_out'){await vault.clear();manualFile=undefined;userIdentity=undefined;currentResults=[];busy=false;emit({state:'disconnected'});}
  });
  current.on('error',error=>{const mapped=classifyError(error);void stopWorker(false,mapped.code).then(()=>emit({state:'error',stage:'starting_worker',error:mapped.code==='TELEGRAM_ERROR'?classifyError(Error('WORKER_FAILED')):mapped}));});
@@ -78,13 +116,22 @@ if(!app.requestSingleInstanceLock())app.quit();
 else app.whenReady().then(async()=>{
  encryption=process.platform==='win32'&&await safeStorage.isAsyncEncryptionAvailable();
  vault=new Vault(app.getPath('userData'),{available:async()=>encryption,encrypt:value=>safeStorage.encryptStringAsync(value),decrypt:async value=>(await safeStorage.decryptStringAsync(value)).result});
- research=new ResearchStore(join(app.getPath('userData'),'industry-research.sqlite'));researchScope=research.lastAccount();research.addEvent('app_started');
+ research=new ResearchStore(join(app.getPath('userData'),'industry-research.sqlite'));researchScope=research.lastAccount();research.addEvent('app_started');queue=new QueueStore(join(app.getPath('userData'),'industry-research.sqlite'));queue.recover();
  win=new BrowserWindow({width:1100,height:850,minWidth:760,minHeight:600,webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  win.removeMenu();
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  win.webContents.on('will-navigate',(event,url)=>{if(url!==page)event.preventDefault();});
  win.webContents.session.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
  win.webContents.session.webRequest.onBeforeRequest((details,callback)=>callback({cancel:!details.url.startsWith(pathToFileURL(__dirname).href+'/')}));
+ ipcMain.handle('queue:action',async(event,input):Promise<QueueReply>=>{
+  if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
+  try{
+   const action=parseQueueAction(input);if(action.type==='list')return {ok:true,jobs:queue.list(researchScope)};
+   if(!researchScope)throw Error('NOT_CONNECTED');
+   if(action.type==='detail'){const record=queue.detail(researchScope,action.id),payload=await decryptJob(record.payload);if(payload.accountId!==researchScope)throw Error('QUEUE_ACCOUNT_MISMATCH');return {ok:true,detail:{job:record.job,text:payload.text,events:record.events}};}
+   queue.change(researchScope,action.id,action.type,action.type==='reschedule'?action.dueAt:undefined,action.type==='reschedule'?action.zone:undefined);return {ok:true,jobs:queue.list(researchScope)};
+  }catch(error){return {ok:false,error:classifyError(error).message};}
+ });
  ipcMain.handle('manual:action',async(event,input):Promise<ManualReply>=>{
   if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
   let ownBusy=false;const epoch=generation;
@@ -101,8 +148,8 @@ else app.whenReady().then(async()=>{
     busy=false;emit({state:'manual_ready'});const {bytes:_,...attachment}=selected;return {ok:true,attachment};
    }
    if(action.type==='preview'&&action.fileId&&manualFile?.id!==action.fileId)throw Error('SEND_FILE_EXPIRED');
-   manualDispatch=action.type==='confirm';startWatch(action.type==='confirm'?180000:90000);
-   return await new Promise<ManualReply>(resolve=>{pendingManual=resolve;try{worker!.postMessage({type:'manual',action,attachment:action.type==='preview'&&action.fileId?manualFile:undefined});}catch(error){pendingManual=undefined;manualDispatch=false;busy=false;stopWatch();emit({state:'error',error:classifyError(error)});resolve({ok:false,error:classifyError(error)});}});
+   pendingSchedule=action.type==='schedule'?{id:action.id,dueAt:action.dueAt,zone:action.zone,accountId:userIdentity.id}:undefined;manualDispatch=action.type==='confirm';startWatch(action.type==='confirm'?180000:90000);
+   return await new Promise<ManualReply>(resolve=>{pendingManual=resolve;try{worker!.postMessage({type:'manual',action,attachment:action.type==='preview'&&action.fileId?manualFile:undefined});}catch(error){pendingManual=undefined;pendingSchedule=undefined;manualDispatch=false;busy=false;stopWatch();emit({state:'error',error:classifyError(error)});resolve({ok:false,error:classifyError(error)});}});
   }catch(error){if(ownBusy&&epoch===generation){busy=false;emit({state:'error',error:classifyError(error)});}return {ok:false,error:classifyError(error)};}
  });
  ipcMain.handle('inbox:action',async(event,input):Promise<InboxReply>=>{
@@ -216,6 +263,7 @@ else app.whenReady().then(async()=>{
   }catch(error){busy=false;emit({state:'error',error:classifyError(error)});}
  });
  await win.loadFile(join(__dirname,'index.html'));
+ if(!process.argv.includes('--smoke-test')){queueTimer=setInterval(()=>{void dispatchQueue();},1000);powerMonitor.on('suspend',()=>{suspended=true;});powerMonitor.on('resume',()=>{queue.overdue(Date.now(),0);lastQueueTick=Date.now();suspended=false;});}
  if(process.argv.includes('--smoke-test')){
   try{
    const ok=await win.webContents.executeJavaScript(`new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{const ready=document.querySelector('h1')?.textContent.includes('Telegram Automation') && typeof window.spike?.action === 'function' && typeof window.spike?.analysis === 'function' && typeof window.spike?.app === 'function' && document.querySelector('nav')?.textContent.includes('Phân tích nhóm/kênh') && typeof require === 'undefined';if(ready||++attempts>=50){clearInterval(timer);resolve(Boolean(ready));}},100);})`);
@@ -253,11 +301,12 @@ else app.whenReady().then(async()=>{
    if(!await win.webContents.executeJavaScript(`document.querySelectorAll('.inbox-message').length===0`))throw Error('SMOKE_FAILED');
    win.webContents.send('spike:status',fixtureStatus);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,500))`);
    if(fixtureReads!==beforeReconnect+2||!await win.webContents.executeJavaScript(`document.querySelector('.inbox-message')?.textContent.includes('Đã sửa <script>')`))throw Error('SMOKE_FAILED');console.log('INBOX_RECONNECT_REFRESH_PASS');
-   let fixtureManualSends=0,fixtureManualToken=false,fixtureManualUncertain=false,fixtureRightsBlocked=true,fixtureManualRate=false;let fixtureReplyId:number|undefined;
-   ipcMain.removeHandler('manual:action');ipcMain.handle('manual:action',(_event,input)=>{
+   let fixtureManualSends=0,fixtureManualToken=false,fixtureManualUncertain=false,fixtureRightsBlocked=true,fixtureManualRate=false;let fixtureReplyId:number|undefined;let fixtureScheduleText='';
+   ipcMain.removeHandler('manual:action');ipcMain.handle('manual:action',async(_event,input)=>{
     const action=parseManualAction(input);
     if(action.type==='capabilities')return {ok:true,capabilities:{recipient:fixtureStatus.userIdentity,checkedAt:new Date().toISOString(),text:{state:fixtureRightsBlocked?'blocked':'allowed',reason:'Quyền kiểm thử',code:fixtureRightsBlocked?'CHAT_SEND_PLAIN_FORBIDDEN':undefined},photo:{state:'allowed',reason:'Quyền kiểm thử'},document:{state:'unknown',reason:'Chưa xác định'},notes:['Thông tin kiểm thử, chưa gửi tin.']}};
-    if(action.type==='preview'){fixtureManualToken=true;fixtureReplyId=action.replyTo;return {ok:true,preview:{id:'00000000-0000-4000-8000-000000000007',recipient:fixtureStatus.userIdentity,text:action.text,reply:action.replyTo?{id:action.replyTo,text:fixtureMessages[0].text}:undefined,expiresAt:new Date(Date.now()+300000).toISOString()}};}
+    if(action.type==='schedule'&&fixtureManualToken){fixtureManualToken=false;const recipient={id:'1',name:'Kiểm thử',kind:'user' as const,peerType:'user' as const};const payload=parseScheduledPayload({accountId:'1',recipient,peer:{type:'self'},text:fixtureScheduleText,randomId:'1234567',purpose:'personal'});const encrypted=await safeStorage.encryptStringAsync(JSON.stringify(payload));const job=queue.create('1',action.id,recipient,action.dueAt,action.zone,encrypted);return {ok:true,scheduled:{id:job.id,dueAt:job.dueAt,zone:job.zone}};}
+    if(action.type==='preview'){fixtureManualToken=true;fixtureScheduleText=action.text;fixtureReplyId=action.replyTo;return {ok:true,preview:{id:'00000000-0000-4000-8000-000000000007',recipient:fixtureStatus.userIdentity,text:action.text,reply:action.replyTo?{id:action.replyTo,text:fixtureMessages[0].text}:undefined,expiresAt:new Date(Date.now()+300000).toISOString()}};}
     if(action.type==='confirm'&&fixtureManualToken){fixtureManualToken=false;fixtureManualSends++;return fixtureManualRate?{ok:false,error:{code:'RATE_LIMIT',message:'Telegram yêu cầu chờ.',retryAfter:2}}:fixtureManualUncertain?{ok:false,error:classifyError(Error('TIMEOUT')),uncertain:true}:{ok:true,sent:{id:77,recipient:fixtureStatus.userIdentity}};}
     return {ok:false,error:classifyError(Error('SEND_PREVIEW_EXPIRED'))};
    });
@@ -294,6 +343,18 @@ else app.whenReady().then(async()=>{
    if(Number(fixtureManualSends)!==4||!await win.webContents.executeJavaScript(`Boolean(document.querySelector('[data-testid="send-cooldown"]'))&&document.querySelector('[data-testid="send-preview"]').disabled&&document.querySelector('[data-testid="send-error-help"]')?.textContent.includes('RATE_LIMIT')`))throw Error('SMOKE_FAILED');
    await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,2400))`);
    if(Number(fixtureManualSends)!==4||!await win.webContents.executeJavaScript(`!document.querySelector('[data-testid="send-preview"]').disabled&&document.querySelector('[data-testid="send-text"]').value==='Giữ bản soạn khi chưa rõ kết quả'`))throw Error('SMOKE_FAILED');console.log('SEND_RATE_LIMIT_GUARD_PASS');
+   if(process.platform==='win32'){
+    const directory=await mkdtemp(join(tmpdir(),'telegram-queue-smoke-')),previousQueue=queue,previousScope=researchScope;queue=new QueueStore(join(directory,'queue.sqlite'));researchScope='1';
+    try{
+     const schedulingOk=await win.webContents.executeJavaScript(`(async()=>{document.querySelector('[data-testid="send-preview"]').click();await new Promise(resolve=>setTimeout(resolve,150));document.querySelector('[data-testid="schedule-review"]').click();await new Promise(resolve=>setTimeout(resolve,100));if(!document.querySelector('[data-testid="schedule-summary"]'))return false;const confirm=document.querySelector('[data-testid="schedule-confirm"]');confirm.click();confirm.click();await new Promise(resolve=>setTimeout(resolve,350));document.querySelector('nav button[data-page="schedule"]').click();await new Promise(resolve=>setTimeout(resolve,250));return Boolean(document.querySelector('[data-job-state="pending"]'));})()`);
+     if(!schedulingOk||Number(fixtureManualSends)!==4||queue.list('1').length!==1)throw Error('SMOKE_FAILED');
+     const controlsOk=await win.webContents.executeJavaScript(`(async()=>{const button=text=>[...document.querySelectorAll('[data-job-state] button')].find(b=>b.textContent===text);button('Xem nội dung').click();await new Promise(resolve=>setTimeout(resolve,150));button('Tạm dừng').click();await new Promise(resolve=>setTimeout(resolve,150));if(!document.querySelector('[data-job-state="paused"]'))return false;button('Tiếp tục').click();await new Promise(resolve=>setTimeout(resolve,150));if(!document.querySelector('[data-job-state="pending"]'))return false;const confirm=window.confirm;window.confirm=()=>true;button('Hủy lịch').click();window.confirm=confirm;await new Promise(resolve=>setTimeout(resolve,150));return Boolean(document.querySelector('[data-job-state="cancelled"]'));})()`);
+     if(!controlsOk)throw Error('SMOKE_FAILED');
+     const job=queue.list('1')[0],payload=await decryptJob(queue.detail('1',job.id).payload);if(payload.text!==fixtureScheduleText)throw Error('SMOKE_FAILED');
+     if((await readFile(join(directory,'queue.sqlite'))).includes(Buffer.from(fixtureScheduleText)))throw Error('PLAINTEXT_FOUND');
+     await win.webContents.executeJavaScript(`document.querySelector('nav button[data-page="inbox"]').click()`);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,100))`);queue.close();queue=new QueueStore(join(directory,'queue.sqlite'));if(queue.list('1')[0].state!=='cancelled')throw Error('SMOKE_FAILED');console.log('QUEUE_SCHEDULE_CONTROLS_PASS');console.log('QUEUE_DPAPI_PERSISTENCE_PASS');
+    }finally{queue.close();queue=previousQueue;researchScope=previousScope;await rm(directory,{recursive:true,force:true});}
+   }
    win.webContents.send('spike:status',{state:'disconnected',userConnected:false});
 
    const templatesOk=await win.webContents.executeJavaScript(`(async()=>{
@@ -349,4 +410,4 @@ else app.whenReady().then(async()=>{
  }
 }).catch(error=>{console.error('APP_START_FAILED',classifyError(error).code);if(!process.argv.includes('--smoke-test'))dialog.showErrorBox('Không thể mở ứng dụng',classifyError(error).message);app.exit(1);});
 app.on('window-all-closed',()=>app.quit());
-app.on('before-quit',()=>{void stopWorker();research?.close();});
+app.on('before-quit',()=>{clearInterval(queueTimer);void stopWorker();queue?.close();research?.close();});

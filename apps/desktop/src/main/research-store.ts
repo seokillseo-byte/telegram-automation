@@ -12,7 +12,7 @@ export class ResearchStore{
   const hasMeta=this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='research_meta'").get();
   const previous=hasMeta?Number(this.db.prepare("SELECT value FROM research_meta WHERE key='schema_version'").get()?.value??0):0;
   const userVersion=Number(this.db.prepare('PRAGMA user_version').get()?.user_version??0);
-  if(previous>4||userVersion>4){this.db.close();throw Error('DATABASE_TOO_NEW');}
+  if(previous>5||userVersion>5){this.db.close();throw Error('DATABASE_TOO_NEW');}
   this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000; BEGIN IMMEDIATE;
    CREATE TABLE IF NOT EXISTS research_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS research_entities(account TEXT NOT NULL,key TEXT NOT NULL,payload TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,query TEXT NOT NULL,saved INTEGER NOT NULL DEFAULT 0,note TEXT NOT NULL DEFAULT '',tags TEXT NOT NULL DEFAULT '',category TEXT NOT NULL DEFAULT '',PRIMARY KEY(account,key));
@@ -23,8 +23,8 @@ export class ResearchStore{
    CREATE TABLE IF NOT EXISTS app_events(id INTEGER PRIMARY KEY,at TEXT NOT NULL,level TEXT NOT NULL,event TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS group_reports(id TEXT PRIMARY KEY,account TEXT NOT NULL,group_id TEXT NOT NULL,at TEXT NOT NULL,payload TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL);
-   INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(4,strftime('%Y-%m-%dT%H:%M:%fZ','now'));
-   INSERT INTO research_meta(key,value) VALUES('schema_version','4') ON CONFLICT(key) DO UPDATE SET value='4'; PRAGMA user_version=4; COMMIT;`);
+   INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(5,strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+   INSERT INTO research_meta(key,value) VALUES('schema_version','5') ON CONFLICT(key) DO UPDATE SET value='5'; PRAGMA user_version=5; COMMIT;`);
  }
  templates():MessageTemplate[]{return this.db.prepare('SELECT id,name,body,updated_at FROM message_templates ORDER BY updated_at DESC,id').all().map(row=>({id:String(row.id),name:String(row.name),body:String(row.body),updatedAt:String(row.updated_at)}));}
  saveTemplate(input:TemplateDraft):string{

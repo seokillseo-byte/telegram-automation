@@ -1,3 +1,4 @@
+import {scheduleTime} from './queue';
 import type {Failure,Identity} from './protocol';
 export const DOCUMENT_MAX=20*1024*1024,PHOTO_MAX=10*1024*1024;
 export type AttachmentInfo={id:string;name:string;size:number;kind:'photo'|'document'};
@@ -8,8 +9,8 @@ export type SendCapabilities={recipient:Identity;checkedAt:string;text:SendCapab
 export type ReplyInfo={id:number;text:string;media?:string};
 export type ComposerReply={key:string;id:number;text:string;available:boolean;token:number};
 export type SendPreview={id:string;recipient:Identity;text:string;attachment?:AttachmentInfo;reply?:ReplyInfo;capabilities?:SendCapabilities;expiresAt:string};
-export type ManualAction={type:'capabilities';target:SendTarget}|{type:'pickFile';kind:'photo'|'document'}|{type:'clearFile'}|{type:'preview';target:SendTarget;text:string;fileId?:string;replyTo?:number}|{type:'confirm';id:string};
-export type ManualReply={ok:true;capabilities?:SendCapabilities;attachment?:AttachmentInfo;preview?:SendPreview;sent?:{id:number;recipient:Identity;replyTo?:number};cancelled?:boolean}|{ok:false;error:Failure;uncertain?:boolean;capabilities?:SendCapabilities};
+export type ManualAction={type:'schedule';id:string;dueAt:string;zone:string}|{type:'capabilities';target:SendTarget}|{type:'pickFile';kind:'photo'|'document'}|{type:'clearFile'}|{type:'preview';target:SendTarget;text:string;fileId?:string;replyTo?:number}|{type:'confirm';id:string};
+export type ManualReply={ok:true;scheduled?:{id:string;dueAt:string;zone:string};capabilities?:SendCapabilities;attachment?:AttachmentInfo;preview?:SendPreview;sent?:{id:number;recipient:Identity;replyTo?:number};cancelled?:boolean}|{ok:false;error:Failure;uncertain?:boolean;capabilities?:SendCapabilities};
 export function sendId(value:unknown):string{if(typeof value!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value))throw Error('INPUT_INVALID');return value;}
 export function parseSendTarget(value:unknown):SendTarget{
  if(!value||typeof value!=='object')throw Error('INPUT_INVALID');
@@ -22,6 +23,7 @@ export function parseSendTarget(value:unknown):SendTarget{
 export function parseManualAction(value:unknown):ManualAction{
  if(!value||typeof value!=='object')throw Error('INPUT_INVALID');const v=value as Record<string,unknown>;
  const only=(keys:string[])=>{if(Object.keys(v).some(k=>!keys.includes(k)))throw Error('INPUT_INVALID');};
+ if(v.type==='schedule'){only(['type','id','dueAt','zone']);return {type:v.type,id:sendId(v.id),...scheduleTime(v.dueAt,v.zone)};}
  if(v.type==='capabilities'){only(['type','target']);return {type:v.type,target:parseSendTarget(v.target)};}
  if(v.type==='pickFile'){only(['type','kind']);if(v.kind!=='photo'&&v.kind!=='document')throw Error('INPUT_INVALID');return {type:v.type,kind:v.kind};}
  if(v.type==='clearFile'){only(['type']);return {type:v.type};}

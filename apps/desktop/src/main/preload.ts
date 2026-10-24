@@ -1,3 +1,4 @@
+import type {QueueAction} from '../../../../packages/shared/src/queue';
 import type {ManualAction} from '../../../../packages/shared/src/manual-send';
 import type {InboxAction,InboxUpdate} from '../../../../packages/shared/src/inbox';
 import {contextBridge,ipcRenderer} from 'electron';
@@ -6,6 +7,7 @@ import type {Action,Status} from '../../../../packages/shared/src/protocol';
 import type {AnalysisAction} from '../../../../packages/shared/src/group-analysis';
 import type {ResearchAction} from '../../../../packages/shared/src/research';
 contextBridge.exposeInMainWorld('spike',{
+ queue:(action:QueueAction)=>ipcRenderer.invoke('queue:action',action),
  manual:(action:ManualAction)=>ipcRenderer.invoke('manual:action',action),
  inboxUpdates:(callback:(update:InboxUpdate)=>void)=>{const listener=(_event:unknown,update:InboxUpdate)=>callback(update);ipcRenderer.on('inbox:update',listener);return ()=>ipcRenderer.removeListener('inbox:update',listener);},
  inbox:(action:InboxAction)=>ipcRenderer.invoke('inbox:action',action),
