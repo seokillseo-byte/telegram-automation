@@ -22,7 +22,7 @@ function provider(batches:unknown[][]){const calls:{method:string;body:Record<st
 
 test('bot commands/config validate allowlisted fields and preview always states that start is not consent',()=>{
  assert.equal(parseBotIntroAction({type:'verify',token,remember:true}).type,'verify');for(const action of [{type:'verify',token:'bad',remember:true},{type:'start',recipients:[42]},{type:'saveConfig',botId:'@name',config:DEFAULT_BOT_INTRO},{type:'saveConfig',botId:'1',config:{welcome:'x',subscribers:[42]}}])assert.throws(()=>parseBotIntroAction(action));
- const menu=introMenu({welcome:'Literal <b>hello</b>'});assert.ok(menu.text.startsWith('Literal <b>hello</b>'));assert.match(menu.text,/chưa đăng ký/);assert.equal(menu.reply_markup.inline_keyboard.length,3);assert.ok(BOT_CHOICES.every(c=>c.answer.length<=200&&Buffer.byteLength(c.id)<=64));assert.equal((menu as {parse_mode?:string}).parse_mode,undefined);
+ const menu=introMenu({welcome:'Literal <b>hello</b>'});assert.ok(menu.text.startsWith('Literal <b>hello</b>'));assert.match(menu.text,/không tự đăng ký/);assert.equal(menu.reply_markup.inline_keyboard.length,3);assert.ok(BOT_CHOICES.every(c=>c.answer.length<=200&&Buffer.byteLength(c.id)<=64));assert.equal((menu as {parse_mode?:string}).parse_mode,undefined);
 });
 
 test('only fresh direct private commands and own-bot private menu callbacks produce replies',()=>{

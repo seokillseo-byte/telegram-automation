@@ -71,3 +71,6 @@ Bước đầu Phase 5: xác nhận lịch từ preview, lưu SQLite với paylo
 
 ## P6.1 · Bot /start · 0.14.0
 [Hướng dẫn và test](docs/BOT_START_V0.14.md): vào Tài khoản để kiểm tra token, xem giới thiệu, bật/dừng bot long polling. /start và nút giới thiệu không tạo đăng ký; xác nhận consent thuộc P6.2. Token có thể lưu DPAPI riêng phiên Telegram. Build nhánh `bot-start-v0.14`; DB schema 8, không hạ về 0.13 hoặc cũ hơn.
+
+## P6.2 · Đồng ý theo chủ đề · 0.15.0
+[Hướng dẫn và test](docs/BOT_CONSENT_V0.15.md): chọn chủ đề rồi xác nhận, /stop hủy mọi chủ đề và vô hiệu hóa nút cũ; lịch sử đồng ý tại Tài khoản → Bot. Chỉ P6.2, chưa thêm CRM hoặc thông báo. Build nhánh `bot-consent-v0.15`; schema 9, không hạ về 0.14 hoặc cũ hơn.
