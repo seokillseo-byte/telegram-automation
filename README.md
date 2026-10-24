@@ -25,3 +25,6 @@ Không commit credential, session hoặc dữ liệu tài khoản thật. Kiểm
 
 ## Module Nghiên cứu ngành 0.1.0
 [Hướng dẫn tính năng và nghiệm thu](docs/INDUSTRY_RESEARCH_V0.1.md): phân nguồn, lọc, lưu SQLite, ghi chú, so sánh, xuất Excel/CSV. Không có lặp truy vấn tự động hoặc gửi tin. Tải artifact Telegram-Industry-Research-Windows-x64 từ Windows Desktop Actions trên nhánh industry-research-v0.1.
+
+## Phân tích nhóm/kênh 0.2.0
+[Hướng dẫn module](docs/GROUP_CHANNEL_ANALYSIS_V0.2.md): thông tin công khai, mẫu tối đa 100 mục lịch sử, hoạt động ngày UTC, tương tác có dữ liệu, tần suất từ và báo cáo Excel. Không lấy danh sách thành viên hoặc username người gửi. Build trên nhánh group-channel-analysis-v0.2.

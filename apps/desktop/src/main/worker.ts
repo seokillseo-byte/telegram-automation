@@ -1,6 +1,7 @@
 import {parentPort} from 'node:worker_threads';
 import {Api} from 'telegram';
 import {makeClient,identity,search} from '../../../../packages/telegram-user/src';
+import {analyzeGroup} from '../../../../packages/telegram-user/src/group-analysis';
 import {classifyError,type Status} from '../../../../packages/shared/src/protocol';
 const port=parentPort!;
 let client:ReturnType<typeof makeClient>|undefined;
@@ -35,6 +36,10 @@ port.on('message',async (message)=>{
   } else if(message.type==='search'){
    if(!client||!await client.checkAuthorization())throw Error('NOT_CONNECTED');
    stage=message.exact?'resolving_username':'searching_public';emit({state:'searching',stage});const results=await search(client,message.query,message.exact);emit({state:'search_complete',stage:'search_complete',queryResults:results,searchContext:{query:message.query,exact:message.exact}});
+  } else if(message.type==='analyzeGroup'){
+   if(!client||!await client.checkAuthorization())throw Error('NOT_CONNECTED');
+   const groupReport=await analyzeGroup(client,message.target,next=>{stage=next;emit({state:'analyzing_group',stage});});
+   stage='group_analysis_complete';emit({state:'group_analysis_complete',stage,groupReport});
   } else if(message.type==='logout'){
    if(client){await client.invoke(new Api.auth.LogOut());await client.destroy();client=undefined;}
    port.postMessage({kind:'logged_out'});

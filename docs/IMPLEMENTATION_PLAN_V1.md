@@ -210,3 +210,6 @@ Các liên kết là tài liệu tham chiếu cho implementation; chưa phải x
 
 ## Điều chỉnh phạm vi theo yêu cầu nghiên cứu ngành
 Bản 0.1.0 đưa một phần SQLite và tìm kiếm/lưu/xuất của Phase 1/3 lên trước, dựa trên Phase 0 đã có đăng nhập/khôi phục/tìm kiếm thật do người dùng kiểm tra. Không bao gồm campaign hoặc gửi tin. Xem INDUSTRY_RESEARCH_V0.1.md để biết tiêu chí và giới hạn; không coi toàn bộ Phase 1–3 đã hoàn thành.
+
+## Module phân tích nhóm/kênh công khai 0.2.0
+Theo phạm vi được người dùng chấp nhận: bổ sung thống kê nhóm/kênh ở cấp tổng hợp, mẫu tối đa 100 mục lịch sử, lưu snapshot và xuất Excel; không thu danh sách thành viên hoặc người tương tác. Xem GROUP_CHANNEL_ANALYSIS_V0.2.md. Đây là phần mở rộng nghiên cứu, không đánh dấu hoàn thành các phase automation/marketing.

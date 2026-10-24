@@ -6,6 +6,8 @@ import {tmpdir} from 'node:os';
 import {pathToFileURL} from 'node:url';
 import {Vault} from './vault';
 import {parseAction,classifyError,type Status} from '../../../../packages/shared/src/protocol';
+import {parseAnalysisAction,aggregateSample,type GroupReport,type AnalysisResponse} from '../../../../packages/shared/src/group-analysis';
+import {groupWorkbook,exportGroupReports} from './group-export';
 import {ResearchStore} from './research-store';
 import {writeExport,toWorkbook} from './research-export';
 import {parseResearchAction,type ResearchPeer,type ResearchResponse} from '../../../../packages/shared/src/research';
@@ -36,6 +38,9 @@ function getWorker(){
   if(worker!==current)return;
   stopWatch();
   if(message.kind==='status'){
+   if(message.status.state==='group_analysis_complete'&&message.status.groupReport){
+    try{research.saveGroupReport(researchScope,message.status.groupReport);}catch{busy=false;emit({state:'error',stage:'saving_group_report',error:classifyError(Error('RESEARCH_ERROR'))});return;}
+   }
    if(message.status.state==='search_complete'&&message.status.searchContext){
     try{
      const context=message.status.searchContext;
@@ -43,7 +48,7 @@ function getWorker(){
      message.status.researchResults=currentResults;
     }catch{busy=false;emit({state:'error',stage:'saving_research',error:classifyError(Error('RESEARCH_ERROR'))});return;}
    }
-   if(['awaiting_code','awaiting_password'].includes(message.status.state)){startWatch();}else if(['searching','connecting'].includes(message.status.state)){startWatch();}else{busy=false;}
+   if(['awaiting_code','awaiting_password'].includes(message.status.state)){startWatch();}else if(['searching','connecting','analyzing_group'].includes(message.status.state)){startWatch();}else{busy=false;}
    emit(message.status);
   } else if(message.kind==='session'){
    try{await vault.save(message.value);if(worker!==current)return;busy=false;userIdentity=message.identity;researchScope=message.identity.id;research.setAccount(researchScope);emit({state:'connected',identity:message.identity});}catch(error){await stopWorker();emit({state:'error',error:classifyError(error)});}
@@ -64,6 +69,25 @@ else app.whenReady().then(async()=>{
  win.webContents.on('will-navigate',(event,url)=>{if(url!==page)event.preventDefault();});
  win.webContents.session.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
  win.webContents.session.webRequest.onBeforeRequest((details,callback)=>callback({cancel:!details.url.startsWith(pathToFileURL(__dirname).href+'/')}));
+ ipcMain.handle('analysis:action',async(event,input):Promise<AnalysisResponse>=>{
+  if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
+  try{
+   const action=parseAnalysisAction(input);
+   if(action.type==='list')return {ok:true,reports:research.listGroupReports(researchScope)};
+   if(!researchScope)throw Error('NOT_CONNECTED');
+   if(action.type==='delete'){research.deleteGroupReports(researchScope,action.ids);return {ok:true,reports:research.listGroupReports(researchScope)};}
+   if(exporting)throw Error('BUSY');
+   const selected=research.selectGroupReports(researchScope,action.ids);
+   exporting=true;
+   try{
+    const chosen=await dialog.showSaveDialog(win,{title:'Xuất báo cáo phân tích nhóm/kênh',defaultPath:join(app.getPath('documents'),`Telegram-Group-Analysis-${new Date().toISOString().slice(0,10)}.xlsx`),filters:[{name:'Excel',extensions:['xlsx']}]});
+    if(chosen.canceled||!chosen.filePath)return {ok:true,cancelled:true};
+    const file=chosen.filePath.toLowerCase().endsWith('.xlsx')?chosen.filePath:chosen.filePath+'.xlsx';
+    try{await exportGroupReports(file,selected);}catch{throw Error('EXPORT_ERROR');}
+    return {ok:true,fileName:basename(file)};
+   }finally{exporting=false;}
+  }catch(error){const code=String((error as {code?:string}).code??'');return {ok:false,error:classifyError(code.startsWith('ERR_SQLITE')||code.startsWith('SQLITE')?Error('RESEARCH_ERROR'):error).message};}
+ });
  ipcMain.handle('research:action',async(event,input):Promise<ResearchResponse>=>{
   if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
   try{
@@ -119,6 +143,7 @@ else app.whenReady().then(async()=>{
     startWatch();return;
    }
    if(!worker)throw Error('NOT_CONNECTED');
+   if(action.type==='analyzeGroup'&&!userIdentity)throw Error('NOT_CONNECTED');
    if(action.type==='search'){if(!userIdentity)throw Error('NOT_CONNECTED');currentResults=[];}
    busy=true;startWatch();worker.postMessage(action);
   }catch(error){busy=false;emit({state:'error',error:classifyError(error)});}
@@ -126,7 +151,7 @@ else app.whenReady().then(async()=>{
  await win.loadFile(join(__dirname,'index.html'));
  if(process.argv.includes('--smoke-test')){
   try{
-   const ok=await win.webContents.executeJavaScript(`new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{const ready=document.querySelector('h1')?.textContent.includes('Nghiên cứu ngành') && typeof window.spike?.action === 'function' && typeof require === 'undefined';if(ready||++attempts>=50){clearInterval(timer);resolve(Boolean(ready));}},100);})`);
+   const ok=await win.webContents.executeJavaScript(`new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{const ready=document.querySelector('h1')?.textContent.includes('Nghiên cứu ngành') && typeof window.spike?.action === 'function' && typeof window.spike?.analysis === 'function' && document.querySelector('nav')?.textContent.includes('Phân tích nhóm/kênh') && typeof require === 'undefined';if(ready||++attempts>=50){clearInterval(timer);resolve(Boolean(ready));}},100);})`);
    if(!ok)throw Error('SMOKE_FAILED');
    if(process.platform==='win32'){
     if(!encryption)throw Error('ENCRYPTION_UNAVAILABLE');
@@ -154,7 +179,11 @@ else app.whenReady().then(async()=>{
     probeStore=new ResearchStore(file);const snapshot=probeStore.snapshot('1');
     if(snapshot.records.length!==1||snapshot.records[0].note!=='Ghi chú thử')throw Error('RESEARCH_ERROR');
     const workbook=await toWorkbook(snapshot.records,'1');if(workbook[0]!==80||workbook[1]!==75)throw Error('EXPORT_ERROR');
-    probeStore.close();console.log('RESEARCH_SQLITE_XLSX_PASS');
+    const report:GroupReport={id:'00000000-0000-4000-8000-000000000001',target:'research_demo',username:'research_demo',groupId:'12345678901234567',title:'Kênh thử',kind:'channel',about:'Mẫu kiểm chứng',members:null,analyzedAt:new Date().toISOString(),sampleLimit:100,fetched:1,historyStatus:'available',mayBeTruncated:false,warnings:[],...aggregateSample([{id:1,date:1700000000,text:'Nghiên cứu',views:5}])};
+    probeStore.saveGroupReport('1',report);probeStore.close();probeStore=new ResearchStore(file);
+    const reports=probeStore.listGroupReports('1');if(reports.length!==1||reports[0].metrics.views.total!==5)throw Error('RESEARCH_ERROR');
+    const analysisBook=await groupWorkbook(reports);if(analysisBook[0]!==80||analysisBook[1]!==75)throw Error('EXPORT_ERROR');
+    probeStore.close();console.log('GROUP_ANALYSIS_SQLITE_XLSX_PASS');console.log('RESEARCH_SQLITE_XLSX_PASS');
    }finally{await rm(researchDir,{recursive:true,force:true});}
    console.log('PHASE0_SMOKE_PASS');app.exit(0);
   }catch(error){console.error('PHASE0_SMOKE_FAIL',classifyError(error).code);app.exit(1);}

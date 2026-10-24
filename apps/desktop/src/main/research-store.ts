@@ -1,3 +1,4 @@
+import type {GroupReport} from '../../../../packages/shared/src/group-analysis';
 import {DatabaseSync} from 'node:sqlite';
 import type {SearchPeer} from '../../../../packages/shared/src/protocol';
 import {peerKey,type ResearchPeer,type ResearchRun,type ResearchSnapshot} from '../../../../packages/shared/src/research';
@@ -10,8 +11,13 @@ export class ResearchStore{
    CREATE TABLE IF NOT EXISTS research_entities(account TEXT NOT NULL,key TEXT NOT NULL,payload TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,query TEXT NOT NULL,saved INTEGER NOT NULL DEFAULT 0,note TEXT NOT NULL DEFAULT '',tags TEXT NOT NULL DEFAULT '',category TEXT NOT NULL DEFAULT '',PRIMARY KEY(account,key));
    CREATE TABLE IF NOT EXISTS research_runs(id INTEGER PRIMARY KEY,account TEXT NOT NULL,query TEXT NOT NULL,exact INTEGER NOT NULL,at TEXT NOT NULL,returned INTEGER NOT NULL,public_count INTEGER NOT NULL,new_count INTEGER NOT NULL,changed_count INTEGER NOT NULL);
    CREATE TABLE IF NOT EXISTS research_observations(run_id INTEGER NOT NULL,account TEXT NOT NULL,key TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(run_id,key),FOREIGN KEY(run_id) REFERENCES research_runs(id) ON DELETE CASCADE);
-   INSERT OR IGNORE INTO research_meta(key,value) VALUES('schema_version','1');`);
+   CREATE TABLE IF NOT EXISTS group_reports(id TEXT PRIMARY KEY,account TEXT NOT NULL,group_id TEXT NOT NULL,at TEXT NOT NULL,payload TEXT NOT NULL);
+   INSERT INTO research_meta(key,value) VALUES('schema_version','2') ON CONFLICT(key) DO UPDATE SET value='2';`);
  }
+ saveGroupReport(account:string,report:GroupReport){this.db.prepare('INSERT INTO group_reports(id,account,group_id,at,payload) VALUES(?,?,?,?,?)').run(report.id,account,report.groupId,report.analyzedAt,JSON.stringify(report));}
+ listGroupReports(account:string):GroupReport[]{return this.db.prepare('SELECT payload FROM group_reports WHERE account=? ORDER BY at DESC LIMIT 100').all(account).map(row=>JSON.parse(String(row.payload)));}
+ selectGroupReports(account:string,ids:string[]):GroupReport[]{return ids.map(id=>{const row=this.db.prepare('SELECT payload FROM group_reports WHERE account=? AND id=?').get(account,id);if(!row)throw Error('INPUT_INVALID');return JSON.parse(String(row.payload));});}
+ deleteGroupReports(account:string,ids:string[]){this.db.exec('BEGIN IMMEDIATE');try{for(const id of ids)this.db.prepare('DELETE FROM group_reports WHERE account=? AND id=?').run(account,id);this.db.exec('COMMIT');}catch(error){this.db.exec('ROLLBACK');throw error;}}
  close(){this.db.close();}
  lastAccount(){return String(this.db.prepare("SELECT value FROM research_meta WHERE key='last_account'").get()?.value??'');}
  setAccount(account:string){this.db.prepare("INSERT INTO research_meta(key,value) VALUES('last_account',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(account);}
