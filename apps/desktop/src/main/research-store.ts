@@ -1,3 +1,4 @@
+import {DEFAULT_PREFERENCES,EVENT_LABELS,parsePreferences,type Preferences,type AppSnapshot} from '../../../../packages/shared/src/app-state';
 import type {GroupReport} from '../../../../packages/shared/src/group-analysis';
 import {DatabaseSync} from 'node:sqlite';
 import type {SearchPeer} from '../../../../packages/shared/src/protocol';
@@ -6,13 +7,29 @@ export class ResearchStore{
  private db:DatabaseSync;
  constructor(file:string){
   this.db=new DatabaseSync(file);
-  this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000;
+  const hasMeta=this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='research_meta'").get();
+  const previous=hasMeta?Number(this.db.prepare("SELECT value FROM research_meta WHERE key='schema_version'").get()?.value??0):0;
+  const userVersion=Number(this.db.prepare('PRAGMA user_version').get()?.user_version??0);
+  if(previous>3||userVersion>3){this.db.close();throw Error('DATABASE_TOO_NEW');}
+  this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000; BEGIN IMMEDIATE;
    CREATE TABLE IF NOT EXISTS research_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS research_entities(account TEXT NOT NULL,key TEXT NOT NULL,payload TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,query TEXT NOT NULL,saved INTEGER NOT NULL DEFAULT 0,note TEXT NOT NULL DEFAULT '',tags TEXT NOT NULL DEFAULT '',category TEXT NOT NULL DEFAULT '',PRIMARY KEY(account,key));
    CREATE TABLE IF NOT EXISTS research_runs(id INTEGER PRIMARY KEY,account TEXT NOT NULL,query TEXT NOT NULL,exact INTEGER NOT NULL,at TEXT NOT NULL,returned INTEGER NOT NULL,public_count INTEGER NOT NULL,new_count INTEGER NOT NULL,changed_count INTEGER NOT NULL);
    CREATE TABLE IF NOT EXISTS research_observations(run_id INTEGER NOT NULL,account TEXT NOT NULL,key TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(run_id,key),FOREIGN KEY(run_id) REFERENCES research_runs(id) ON DELETE CASCADE);
+   CREATE TABLE IF NOT EXISTS app_settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+   CREATE TABLE IF NOT EXISTS app_events(id INTEGER PRIMARY KEY,at TEXT NOT NULL,level TEXT NOT NULL,event TEXT NOT NULL);
    CREATE TABLE IF NOT EXISTS group_reports(id TEXT PRIMARY KEY,account TEXT NOT NULL,group_id TEXT NOT NULL,at TEXT NOT NULL,payload TEXT NOT NULL);
-   INSERT INTO research_meta(key,value) VALUES('schema_version','2') ON CONFLICT(key) DO UPDATE SET value='2';`);
+   CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY,applied_at TEXT NOT NULL);
+   INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES(3,strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+   INSERT INTO research_meta(key,value) VALUES('schema_version','3') ON CONFLICT(key) DO UPDATE SET value='3'; PRAGMA user_version=3; COMMIT;`);
+ }
+ preferences():Preferences{const row=this.db.prepare("SELECT value FROM app_settings WHERE key='preferences'").get();if(!row)return {...DEFAULT_PREFERENCES};try{return parsePreferences(JSON.parse(String(row.value)));}catch{return {...DEFAULT_PREFERENCES};}}
+ savePreferences(value:Preferences){const settings=parsePreferences(value);this.db.prepare("INSERT INTO app_settings(key,value) VALUES('preferences',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify(settings));this.addEvent('settings_saved');}
+ addEvent(event:string){const safe=Object.hasOwn(EVENT_LABELS,event)?event:'other';this.db.prepare('INSERT INTO app_events(at,level,event) VALUES(?,?,?)').run(new Date().toISOString(),safe==='error'?'error':'info',safe);this.db.exec('DELETE FROM app_events WHERE id NOT IN (SELECT id FROM app_events ORDER BY id DESC LIMIT 1000)');}
+ clearEvents(){this.db.exec('DELETE FROM app_events');this.addEvent('logs_cleared');}
+ appSnapshot(account:string):AppSnapshot{
+  const count=(table:string,filter:string)=>Number(this.db.prepare(`SELECT count(*) AS n FROM ${table} WHERE account=? ${filter}`).get(account)?.n??0);
+  return {preferences:this.preferences(),events:this.db.prepare('SELECT id,at,level,event FROM app_events ORDER BY id DESC LIMIT 200').all().map(row=>({id:Number(row.id),at:String(row.at),level:String(row.level) as 'info'|'error',event:String(row.event)})),counts:{saved:count('research_entities','AND saved=1'),searches:count('research_runs',''),reports:count('group_reports','')}};
  }
  saveGroupReport(account:string,report:GroupReport){this.db.prepare('INSERT INTO group_reports(id,account,group_id,at,payload) VALUES(?,?,?,?,?)').run(report.id,account,report.groupId,report.analyzedAt,JSON.stringify(report));}
  listGroupReports(account:string):GroupReport[]{return this.db.prepare('SELECT payload FROM group_reports WHERE account=? ORDER BY at DESC LIMIT 100').all(account).map(row=>JSON.parse(String(row.payload)));}

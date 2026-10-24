@@ -28,3 +28,6 @@ Không commit credential, session hoặc dữ liệu tài khoản thật. Kiểm
 
 ## Phân tích nhóm/kênh 0.2.0
 [Hướng dẫn module](docs/GROUP_CHANNEL_ANALYSIS_V0.2.md): thông tin công khai, mẫu tối đa 100 mục lịch sử, hoạt động ngày UTC, tương tác có dữ liệu, tần suất từ và báo cáo Excel. Không lấy danh sách thành viên hoặc username người gửi. Build trên nhánh group-channel-analysis-v0.2.
+
+## Phase 1 — 0.3.0
+[Khung ứng dụng và hướng dẫn T01–T02](docs/PHASE1_FOUNDATION.md): menu đầy đủ, tổng quan dữ liệu thật, cài đặt có lưu, nhật ký không chứa bí mật, SQLite schema migration. Hộp thư/mẫu tin/lịch gửi có nhãn chưa khả dụng. Nhánh phase-1-app-foundation.

@@ -1,9 +1,10 @@
-import React,{useEffect,useState} from 'react';
+import {useEffect,useState} from 'react';
+import {useDateFormatter} from './preferences';
 import {GROUP_SAMPLE_LIMIT,type GroupReport,type AnalysisAction} from '../../../../packages/shared/src/group-analysis';
 import type {Status} from '../../../../packages/shared/src/protocol';
 const num=(value:number|null)=>value===null?'Không khả dụng':new Intl.NumberFormat('vi-VN',{maximumFractionDigits:2}).format(value);
-const time=(value:string|null)=>value?new Date(value).toLocaleString('vi-VN'):'Không khả dụng';
 export function GroupAnalysis({status,busy,initialTarget,onAnalyze}:{status:Status;busy:boolean;initialTarget:string;onAnalyze:(target:string)=>void}){
+ const time=useDateFormatter();
  const [target,setTarget]=useState(initialTarget),[reports,setReports]=useState<GroupReport[]>([]),[active,setActive]=useState<GroupReport|null>(null),[selected,setSelected]=useState<Set<string>>(new Set()),[working,setWorking]=useState(false),[notice,setNotice]=useState('');
  async function action(value:AnalysisAction){const reply=await window.spike.analysis(value);if(!reply.ok)throw Error(reply.error);if(reply.reports)setReports(reply.reports);return reply;}
  async function refresh(){try{await action({type:'list'});}catch{setNotice('Không đọc được báo cáo đã lưu.');}}
