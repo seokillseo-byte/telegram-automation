@@ -62,3 +62,6 @@ Bước đầu Phase 5: xác nhận lịch từ preview, lưu SQLite với paylo
 
 ## P5.3 · Thử lại có phân loại · 0.11.0
 [Hướng dẫn và test](docs/QUEUE_RETRY_V0.11.md): tối đa 3 lần thử cho lịch văn bản cá nhân, chờ theo Telegram, lưu thời điểm thử lại, tạm dừng/hủy. Không tự thử lại khi chưa rõ kết quả gửi. Build nhánh `queue-retry-v0.11`; schema 6 không hạ về phiên bản cũ.
+
+## P5.4 · Phục hồi hàng đợi · 0.12.0
+[Hướng dẫn và test](docs/QUEUE_RECOVERY_V0.12.md): review sau crash/sleep/mất kết nối, vô hiệu hóa lượt cũ và chặn lệnh quá hạn, bộ lọc/số đếm cần kiểm tra. Không tự gửi bù hay retry uncertain. Build nhánh `queue-recovery-v0.12`, tiếp tục schema 6.

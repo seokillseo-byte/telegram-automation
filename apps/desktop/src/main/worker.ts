@@ -41,8 +41,8 @@ port.on('message',async (message)=>{
    unsubscribeInbox=subscribeInboxUpdates(client,inbox,update=>port.postMessage({kind:'inbox_update',update}));
    port.postMessage({kind:'session',value:{apiId:message.apiId,apiHash:message.apiHash,session:client.session.save()},identity:identity(me as Api.User)});
   } else if(message.type==='scheduled'){
-   try{if(!client)throw Error('NOT_CONNECTED');port.postMessage({kind:'queue_result',id:message.id,reply:await sender.scheduled(client,message.payload,ownAccount)});}
-   catch(error){port.postMessage({kind:'queue_result',id:message.id,reply:{ok:false,error:sender.noteFailure(error)}});}
+   try{if(!client)throw Error('NOT_CONNECTED');if(typeof message.expiresAt!=='number'||!Number.isFinite(message.expiresAt))throw Error('QUEUE_DISPATCH_EXPIRED');port.postMessage({kind:'queue_result',id:message.id,runId:message.runId,reply:await sender.scheduled(client,message.payload,ownAccount,message.expiresAt)});}
+   catch(error){port.postMessage({kind:'queue_result',id:message.id,runId:message.runId,reply:{ok:false,error:sender.noteFailure(error)}});}
   } else if(message.type==='manual'){
    try{if(!client)throw Error('NOT_CONNECTED');if(message.action.type==='schedule'){port.postMessage({kind:'schedule_ready',payload:sender.exportSchedule(message.action.id,ownAccount),previewId:message.action.id,dueAt:message.action.dueAt,zone:message.action.zone});return;}const reply=message.action.type==='capabilities'?await sender.capabilities(client,inbox,message.action):message.action.type==='preview'?await sender.preview(client,inbox,message.action,message.attachment):await sender.confirm(client,message.action.id);port.postMessage({kind:'manual',reply});}
    catch(error){port.postMessage({kind:'manual',reply:{ok:false,error:sender.noteFailure(error)}});}

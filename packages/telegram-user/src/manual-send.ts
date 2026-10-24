@@ -1,4 +1,4 @@
-import {parseScheduledPayload,type ScheduledPayload,type ScheduledPeer} from '../../shared/src/queue';
+import {QUEUE_GRACE_MS,parseScheduledPayload,type ScheduledPayload,type ScheduledPeer} from '../../shared/src/queue';
 import {sendCapabilities} from './send-capabilities';
 import {randomUUID,createHash} from 'node:crypto';
 import {generateRandomLong,returnBigInt} from 'telegram/Helpers';
@@ -64,14 +64,15 @@ export class ManualSender{
   else if(draft.peer instanceof Api.InputPeerChat)peer={type:'chat',id:draft.peer.chatId.toString()};else throw Error('SCHEDULE_TEXT_ONLY');
   const payload=parseScheduledPayload({accountId,recipient:draft.preview.recipient,peer,text:draft.preview.text,randomId:generateRandomLong().toString(),purpose:'personal'});this.draft=undefined;return payload;
  }
- async scheduled(client:TelegramClient,input:unknown,accountId:string):Promise<ManualReply>{
-  let dispatched=false;
+ async scheduled(client:TelegramClient,input:unknown,accountId:string,expiresAt?:number):Promise<ManualReply>{
+  let dispatched=false;const monoDeadline=expiresAt===undefined?undefined:performance.now()+Math.max(0,expiresAt-Date.now());
+  const checkDeadline=()=>{if(expiresAt!==undefined&&(!Number.isFinite(expiresAt)||expiresAt-Date.now()>QUEUE_GRACE_MS||Date.now()>expiresAt||performance.now()>monoDeadline!))throw Error('QUEUE_DISPATCH_EXPIRED');};
   try{
-   this.checkCooldown();const payload=parseScheduledPayload(input);if(payload.accountId!==accountId)throw Error('QUEUE_ACCOUNT_MISMATCH');
+   checkDeadline();this.checkCooldown();const payload=parseScheduledPayload(input);if(payload.accountId!==accountId)throw Error('QUEUE_ACCOUNT_MISMATCH');
    const ref=payload.peer,peer=ref.type==='self'?new Api.InputPeerSelf():ref.type==='user'?new Api.InputPeerUser({userId:returnBigInt(ref.id),accessHash:returnBigInt(ref.accessHash)}):ref.type==='channel'?new Api.InputPeerChannel({channelId:returnBigInt(ref.id),accessHash:returnBigInt(ref.accessHash)}):new Api.InputPeerChat({chatId:returnBigInt(ref.id)});
    const entity=await client.getEntity(peer);if(!supported(entity))throw Error('SEND_FORBIDDEN');const recipient=identity(entity);
    if(recipient.id!==payload.recipient.id||recipient.peerType!==payload.recipient.peerType)throw Error('QUEUE_ACCOUNT_MISMATCH');allowed(entity,false,false);
-   const request=new Api.messages.SendMessage({peer,message:payload.text,entities:[],noWebpage:true,randomId:returnBigInt(payload.randomId)});dispatched=true;const retries=client._requestRetries;let result:Api.TypeUpdates;try{client._requestRetries=1;result=await client.invoke(request);}finally{client._requestRetries=retries;}
+   checkDeadline();const request=new Api.messages.SendMessage({peer,message:payload.text,entities:[],noWebpage:true,randomId:returnBigInt(payload.randomId)});dispatched=true;const retries=client._requestRetries;let result:Api.TypeUpdates;try{client._requestRetries=1;result=await client.invoke(request);}finally{client._requestRetries=retries;}
    let remoteId:number|undefined;
    if(result instanceof Api.UpdateShortSentMessage)remoteId=result.id;
    else if(result instanceof Api.Updates||result instanceof Api.UpdatesCombined){const mapped=result.updates.find((update):update is Api.UpdateMessageID=>update instanceof Api.UpdateMessageID&&update.randomId?.toString()===payload.randomId);remoteId=mapped?.id;}
