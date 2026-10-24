@@ -1,7 +1,7 @@
 name: Windows Desktop
 on:
   push:
-    branches: [main, phase-0-foundation-spike, industry-research-v0.1, group-channel-analysis-v0.2, phase-1-app-foundation, message-templates-v0.4, inbox-read-v0.5, inbox-live-v0.6, manual-send-v0.7, reply-templates-v0.8, send-rights-v0.9, one-time-queue-v0.10, queue-retry-v0.11, queue-recovery-v0.12]
+    branches: [main, phase-0-foundation-spike, industry-research-v0.1, group-channel-analysis-v0.2, phase-1-app-foundation, message-templates-v0.4, inbox-read-v0.5, inbox-live-v0.6, manual-send-v0.7, reply-templates-v0.8, send-rights-v0.9, one-time-queue-v0.10, queue-retry-v0.11, queue-recovery-v0.12, send-consent-v0.13]
   pull_request:
   workflow_dispatch:
 permissions:

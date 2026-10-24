@@ -19,7 +19,7 @@ async function fixture(){
  const clock={wall:due,mono:100},context={accountId:'1',connected:true,online:true,suspended:false,busy:false};
  const sends:{id:string;runId:string;expiresAt:number;payload:ScheduledPayload}[]=[],terminations:string[]=[],errors:unknown[]=[];
  let decrypt:(bytes:Buffer)=>Promise<ScheduledPayload>=async()=>payload;
- const runner=new QueueRunner({store:()=>store,context:()=>context,decrypt:bytes=>decrypt(bytes),send:(id,payload,expiresAt,runId)=>sends.push({id,payload,expiresAt,runId}),lock:value=>{context.busy=value;},terminate:code=>{terminations.push(code);context.connected=false;},changed:()=>{},error:error=>errors.push(error)},()=>clock.wall,()=>clock.mono);
+ const runner=new QueueRunner({authorize:()=>{},store:()=>store,context:()=>context,decrypt:bytes=>decrypt(bytes),send:(id,payload,expiresAt,runId)=>sends.push({id,payload,expiresAt,runId}),lock:value=>{context.busy=value;},terminate:code=>{terminations.push(code);context.connected=false;},changed:()=>{},error:error=>errors.push(error)},()=>clock.wall,()=>clock.mono);
  return {directory,file,store,due,clock,context,sends,terminations,errors,runner,decrypt:(fn:typeof decrypt)=>{decrypt=fn;},job:(n:number,at=due,account='1')=>store.create(account,uid(n),recipient,new Date(at).toISOString(),'UTC',Buffer.from('encrypted fixture')),close:async()=>{store.close();await rm(directory,{recursive:true,force:true});}};
 }
 
@@ -93,7 +93,7 @@ test('actual process kill after committed claim recovers uncertain without dupli
 test('worker checks expiry before lookup and immediately before sending, with no dispatch on expiry',async()=>{
  const sdk=createRequire(resolve('apps/desktop/package.json')),{Api}=sdk('telegram');let lookups=0,sends=0;
  const client={getEntity:async()=>{lookups++;await new Promise(resolve=>setTimeout(resolve,30));return new Api.User({id:BigInt(9),firstName:'Fixture',accessHash:BigInt(55)});},invoke:async()=>{sends++;throw Error('Should never send');}};
- const sender=new ManualSender(),expired=await sender.scheduled(client as never,payload,'1',Date.now()-1);assert.ok(!expired.ok&&expired.error.code==='QUEUE_DISPATCH_EXPIRED'&&!expired.uncertain);assert.equal(lookups,0);
+ const sender=new ManualSender(()=>{}),expired=await sender.scheduled(client as never,payload,'1',Date.now()-1);assert.ok(!expired.ok&&expired.error.code==='QUEUE_DISPATCH_EXPIRED'&&!expired.uncertain);assert.equal(lookups,0);
  const duringLookup=await sender.scheduled(client as never,payload,'1',Date.now()+10);assert.ok(!duringLookup.ok&&duringLookup.error.code==='QUEUE_DISPATCH_EXPIRED'&&!duringLookup.uncertain);assert.equal(sends,0);assert.equal(lookups,1);
 });
 

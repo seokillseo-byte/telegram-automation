@@ -1,3 +1,4 @@
+import type {SendPurpose} from '../../shared/src/send-policy';
 import {QUEUE_GRACE_MS,parseScheduledPayload,type ScheduledPayload,type ScheduledPeer} from '../../shared/src/queue';
 import {sendCapabilities} from './send-capabilities';
 import {randomUUID,createHash} from 'node:crypto';
@@ -35,6 +36,7 @@ async function checkedReply(client:TelegramClient,peer:Api.TypeInputPeer,id:numb
  return {info:{id,text:(message.message??'').slice(0,200),media:message.media&&!(message.media instanceof Api.MessageMediaEmpty)?'Nội dung đính kèm':undefined},fingerprint};
 }
 export class ManualSender{
+ constructor(private authorize:(recipient:Identity,purpose:SendPurpose)=>void=()=>{throw Error('POLICY_UNAVAILABLE');}){}
  private draft:Draft|undefined;
  private blockedUntil=0;
  reset(){this.draft=undefined;this.blockedUntil=0;}
@@ -51,7 +53,8 @@ export class ManualSender{
   let reply:Awaited<ReturnType<typeof checkedReply>>|undefined;
   if(action.replyTo!==undefined){if(action.target.kind!=='dialog'||!inbox.canReply(action.target.key,action.replyTo))throw Error('SEND_REPLY_UNAVAILABLE');reply=await checkedReply(client,peer,action.replyTo,action.target.key);}
   const info=attachment?{id:attachment.id,name:attachment.name,size:attachment.size,kind:attachment.kind}:undefined;
-  const preview:SendPreview={id,recipient,text:action.text,attachment:info,reply:reply?.info,capabilities,expiresAt:new Date(Date.now()+5*60*1000).toISOString()};
+  this.authorize(recipient,action.purpose??'personal');if(action.purpose==='marketing'&&(attachment||reply))throw Error('SCHEDULE_TEXT_ONLY');
+  const preview:SendPreview={id,recipient,purpose:action.purpose??'personal',text:action.text,attachment:info,reply:reply?.info,capabilities,expiresAt:new Date(Date.now()+5*60*1000).toISOString()};
   this.draft={preview,peer,attachment,replyFingerprint:reply?.fingerprint};return {ok:true,preview,capabilities};
  }
  exportSchedule(id:string,accountId:string):ScheduledPayload{
@@ -62,17 +65,17 @@ export class ManualSender{
   else if(draft.peer instanceof Api.InputPeerUser)peer={type:'user',id:draft.peer.userId.toString(),accessHash:draft.peer.accessHash.toString()};
   else if(draft.peer instanceof Api.InputPeerChannel)peer={type:'channel',id:draft.peer.channelId.toString(),accessHash:draft.peer.accessHash.toString()};
   else if(draft.peer instanceof Api.InputPeerChat)peer={type:'chat',id:draft.peer.chatId.toString()};else throw Error('SCHEDULE_TEXT_ONLY');
-  const payload=parseScheduledPayload({accountId,recipient:draft.preview.recipient,peer,text:draft.preview.text,randomId:generateRandomLong().toString(),purpose:'personal'});this.draft=undefined;return payload;
+  const payload=parseScheduledPayload({accountId,recipient:draft.preview.recipient,peer,text:draft.preview.text,randomId:generateRandomLong().toString(),purpose:draft.preview.purpose??'personal'});this.authorize(payload.recipient,payload.purpose);this.draft=undefined;return payload;
  }
  async scheduled(client:TelegramClient,input:unknown,accountId:string,expiresAt?:number):Promise<ManualReply>{
   let dispatched=false;const monoDeadline=expiresAt===undefined?undefined:performance.now()+Math.max(0,expiresAt-Date.now());
   const checkDeadline=()=>{if(expiresAt!==undefined&&(!Number.isFinite(expiresAt)||expiresAt-Date.now()>QUEUE_GRACE_MS||Date.now()>expiresAt||performance.now()>monoDeadline!))throw Error('QUEUE_DISPATCH_EXPIRED');};
   try{
-   checkDeadline();this.checkCooldown();const payload=parseScheduledPayload(input);if(payload.accountId!==accountId)throw Error('QUEUE_ACCOUNT_MISMATCH');
+   checkDeadline();this.checkCooldown();const payload=parseScheduledPayload(input);if(payload.accountId!==accountId)throw Error('QUEUE_ACCOUNT_MISMATCH');this.authorize(payload.recipient,payload.purpose);
    const ref=payload.peer,peer=ref.type==='self'?new Api.InputPeerSelf():ref.type==='user'?new Api.InputPeerUser({userId:returnBigInt(ref.id),accessHash:returnBigInt(ref.accessHash)}):ref.type==='channel'?new Api.InputPeerChannel({channelId:returnBigInt(ref.id),accessHash:returnBigInt(ref.accessHash)}):new Api.InputPeerChat({chatId:returnBigInt(ref.id)});
    const entity=await client.getEntity(peer);if(!supported(entity))throw Error('SEND_FORBIDDEN');const recipient=identity(entity);
    if(recipient.id!==payload.recipient.id||recipient.peerType!==payload.recipient.peerType)throw Error('QUEUE_ACCOUNT_MISMATCH');allowed(entity,false,false);
-   checkDeadline();const request=new Api.messages.SendMessage({peer,message:payload.text,entities:[],noWebpage:true,randomId:returnBigInt(payload.randomId)});dispatched=true;const retries=client._requestRetries;let result:Api.TypeUpdates;try{client._requestRetries=1;result=await client.invoke(request);}finally{client._requestRetries=retries;}
+   checkDeadline();this.authorize(recipient,payload.purpose);const request=new Api.messages.SendMessage({peer,message:payload.text,entities:[],noWebpage:true,randomId:returnBigInt(payload.randomId)});dispatched=true;const retries=client._requestRetries;let result:Api.TypeUpdates;try{client._requestRetries=1;result=await client.invoke(request);}finally{client._requestRetries=retries;}
    let remoteId:number|undefined;
    if(result instanceof Api.UpdateShortSentMessage)remoteId=result.id;
    else if(result instanceof Api.Updates||result instanceof Api.UpdatesCombined){const mapped=result.updates.find((update):update is Api.UpdateMessageID=>update instanceof Api.UpdateMessageID&&update.randomId?.toString()===payload.randomId);remoteId=mapped?.id;}
@@ -86,11 +89,12 @@ export class ManualSender{
   try{const entity=await client.getEntity(draft.peer);if(!supported(entity))throw Error('SEND_FORBIDDEN');capabilities=sendCapabilities(entity);allowed(entity,Boolean(draft.attachment),draft.attachment?.kind==='photo');recipient=identity(entity);if(draft.preview.reply){const checked=await checkedReply(client,draft.peer,draft.preview.reply.id,recipient.peerType+':'+recipient.id);if(checked.fingerprint!==draft.replyFingerprint)throw Error('SEND_REPLY_CHANGED');}if(recipient.id!==draft.preview.recipient.id||recipient.peerType!==draft.preview.recipient.peerType)throw Error('SEND_PREVIEW_EXPIRED');}catch(error){return {ok:false,error:this.noteFailure(error),capabilities};}
   let dispatched=false;
   try{
+   this.authorize(recipient,draft.preview.purpose??'personal');
    const media=draft.attachment?await uploadSendAttachment(client,draft.attachment):undefined;
    if(media){const fresh=await client.getEntity(draft.peer);if(!supported(fresh))throw Error('SEND_FORBIDDEN');const current=identity(fresh);if(current.id!==recipient.id||current.peerType!==recipient.peerType)throw Error('SEND_PREVIEW_EXPIRED');capabilities=sendCapabilities(fresh);allowed(fresh,true,draft.attachment?.kind==='photo');}
    if(media&&draft.preview.reply){const checked=await checkedReply(client,draft.peer,draft.preview.reply.id,recipient.peerType+':'+recipient.id);if(checked.fingerprint!==draft.replyFingerprint)throw Error('SEND_REPLY_CHANGED');}
-   dispatched=true;
-   const result=draft.attachment?await client.sendFile(draft.peer,{file:media!,caption:draft.preview.text,forceDocument:draft.attachment.kind==='document',parseMode:false,formattingEntities:[],workers:1,replyTo:draft.preview.reply?.id}):await client.sendMessage(draft.peer,{message:draft.preview.text,parseMode:false,formattingEntities:[],linkPreview:false,replyTo:draft.preview.reply?.id});
+   this.authorize(recipient,draft.preview.purpose??'personal');dispatched=true;
+   const retries=client._requestRetries;let result:Api.Message;try{client._requestRetries=1;result=draft.attachment?await client.sendFile(draft.peer,{file:media!,caption:draft.preview.text,forceDocument:draft.attachment.kind==='document',parseMode:false,formattingEntities:[],workers:1,replyTo:draft.preview.reply?.id}):await client.sendMessage(draft.peer,{message:draft.preview.text,parseMode:false,formattingEntities:[],linkPreview:false,replyTo:draft.preview.reply?.id});}finally{client._requestRetries=retries;}
    if(!(result instanceof Api.Message)||!result.id)throw Error('SEND_NO_ACK');
    return {ok:true,sent:{id:result.id,recipient,replyTo:draft.preview.reply?.id}};
   }catch(error){const mapped=this.noteFailure(error),rpc=Number((error as {code?:number}).code);const definite=!dispatched||mapped.code==='RATE_LIMIT'||rpc>=400&&rpc<500||['CHAT_WRITE_FORBIDDEN','USER_PRIVACY_RESTRICTED','USER_IS_BLOCKED','YOU_BLOCKED_USER','USER_BANNED_IN_CHANNEL','SEND_FORBIDDEN','PEER_FLOOD','CHAT_SEND_MEDIA_FORBIDDEN','CHAT_SEND_PHOTOS_FORBIDDEN','CHAT_SEND_DOCS_FORBIDDEN','CHAT_SEND_PLAIN_FORBIDDEN','CHANNEL_PRIVATE','SLOWMODE_WAIT'].includes(mapped.code);return {ok:false,error:mapped,uncertain:!definite,capabilities};}

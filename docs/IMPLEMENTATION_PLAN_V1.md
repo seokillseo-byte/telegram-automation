@@ -243,3 +243,6 @@ Thử lại có phân loại cho lịch văn bản cá nhân: tối đa 3 lần,
 
 ### P5.4 · 0.12.0
 Phục hồi crash/sleep/mất kết nối và màn review. QueueRunner vô hiệu hóa lượt sau gián đoạn, kiểm tra lại sau decrypt, worker kiểm tra hạn trước SendMessage; runId ngăn kết quả cũ ghi đè lượt mới. Lịch quá giờ cần review, lượt đã chuyển worker thành uncertain khi gián đoạn. Có số đếm/bộ lọc review, lý do và xác nhận giờ mới chỉ khi chưa thử. [Nghiệm thu và hướng dẫn test](QUEUE_RECOVERY_V0.12.md). Test crash kill child process và SQLite thật; sleep/network/clock dùng fixture. Chưa nghiệm thu live 0.12. Tiếp theo P5.5 consent/suppression.
+
+### P5.5 · 0.13.0
+Consent marketing và suppression theo tài khoản + peer namespace; nguồn/lịch sử ghi nhận thủ công. Kiểm tra ở preview, sau mã hóa khi tạo lịch, sau giải mã và ngay trước gửi trong worker đọc DB chỉ đọc. Rút đồng ý hủy lịch marketing chưa chạy, suppression hủy mọi lịch tương ứng; lượt đã chuyển worker thành uncertain và không replay. Ghim purpose, không suy đồng ý từ hồ sơ nghiên cứu; bỏ chặn không tự khôi phục consent. DB schema 7 ngăn bản cũ bỏ qua kiểm tra. [Test và giới hạn](SEND_CONSENT_V0.13.md). Chưa nghiệm thu live toàn Phase 5. Tiếp theo P6.1 /start và lựa chọn đăng ký bot; không kế thừa quyền bot từ consent tài khoản người dùng.

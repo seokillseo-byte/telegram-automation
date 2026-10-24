@@ -47,14 +47,14 @@ function transport(){const entity=new Api.User({id:BigInt(9),firstName:'Recipien
  return {client,stats:()=>({sends,randomIds})};}
 
 test('scheduling consumes preview without sending, persists fixed peer/random ID and verifies account on dispatch',async()=>{
- const {client,stats}=transport(),sender=new ManualSender();const preview=await sender.preview(client as never,new InboxReader(),{type:'preview',target:{kind:'username',username:'recipient'},text:'Scheduled **literal**'});assert.ok(preview.ok&&preview.preview);const id=preview.ok?preview.preview!.id:'';
+ const {client,stats}=transport(),sender=new ManualSender(()=>{});const preview=await sender.preview(client as never,new InboxReader(),{type:'preview',target:{kind:'username',username:'recipient'},text:'Scheduled **literal**'});assert.ok(preview.ok&&preview.preview);const id=preview.ok?preview.preview!.id:'';
  const payload=sender.exportSchedule(id,'1');assert.equal(stats().sends,0);assert.equal(payload.recipient.id,'9');assert.throws(()=>sender.exportSchedule(id,'1'),/SEND_PREVIEW_EXPIRED/);const stored=parseScheduledPayload(JSON.parse(JSON.stringify(payload)));
  const wrong=await sender.scheduled(client as never,stored,'2');assert.ok(!wrong.ok&&wrong.error.code==='QUEUE_ACCOUNT_MISMATCH');assert.equal(stats().sends,0);const sent=await sender.scheduled(client as never,stored,'1');assert.ok(sent.ok&&sent.sent?.id===77);assert.deepEqual(stats(),{sends:1,randomIds:[payload.randomId]});
 });
 
-test('scheduled lost acknowledgment is uncertain and malformed/marketing payload never dispatches',async()=>{
- const payload:ScheduledPayload={accountId:'1',recipient:user,peer:{type:'user',id:'9',accessHash:'55'},text:'Hello',randomId:'12345',purpose:'personal'};const {client,stats}=transport();let attempts=0;client.invoke=async()=>{attempts++;throw Error('TIMEOUT');};const result=await new ManualSender().scheduled(client as never,payload,'1');assert.ok(!result.ok&&result.uncertain);
- assert.throws(()=>parseScheduledPayload({...payload,purpose:'marketing'}));const bad=await new ManualSender().scheduled(client as never,{...payload,peer:{type:'user',id:'88',accessHash:'55'}},'1');assert.ok(!bad.ok&&!bad.uncertain);assert.equal(attempts,1);assert.equal(stats().sends,0);
+test('scheduled lost acknowledgment is uncertain and malformed/unsupported-purpose payload never dispatches',async()=>{
+ const payload:ScheduledPayload={accountId:'1',recipient:user,peer:{type:'user',id:'9',accessHash:'55'},text:'Hello',randomId:'12345',purpose:'personal'};const {client,stats}=transport();let attempts=0;client.invoke=async()=>{attempts++;throw Error('TIMEOUT');};const result=await new ManualSender(()=>{}).scheduled(client as never,payload,'1');assert.ok(!result.ok&&result.uncertain);
+ assert.throws(()=>parseScheduledPayload({...payload,purpose:'bulk'}));const bad=await new ManualSender(()=>{}).scheduled(client as never,{...payload,peer:{type:'user',id:'88',accessHash:'55'}},'1');assert.ok(!bad.ok&&!bad.uncertain);assert.equal(attempts,1);assert.equal(stats().sends,0);
 });
 
 test('classified retries persist waits, block account, reuse payload and stop after three attempts',async()=>{
@@ -83,8 +83,8 @@ test('uncertain and permanent failures never retry; interrupted retry is review 
 test('scheduled adapter disables SDK request retries, restores setting, and distinguishes pre-send network errors',async()=>{
  const payload:ScheduledPayload={accountId:'1',recipient:user,peer:{type:'user',id:'9',accessHash:'55'},text:'Hello',randomId:'12345',purpose:'personal'};
  const fixture=transport(),client={...fixture.client,_requestRetries:5};let sends=0;client.invoke=async()=>{assert.equal(client._requestRetries,1);sends++;throw Error('ECONNRESET');};
- const sent=await new ManualSender().scheduled(client as never,payload,'1');assert.ok(!sent.ok&&sent.uncertain);assert.equal(sends,1);assert.equal(client._requestRetries,5);
- client.getEntity=async()=>{throw Error('ECONNRESET');};const before=await new ManualSender().scheduled(client as never,payload,'1');assert.ok(!before.ok&&!before.uncertain&&before.error.code==='ECONNRESET');assert.equal(sends,1);
+ const sent=await new ManualSender(()=>{}).scheduled(client as never,payload,'1');assert.ok(!sent.ok&&sent.uncertain);assert.equal(sends,1);assert.equal(client._requestRetries,5);
+ client.getEntity=async()=>{throw Error('ECONNRESET');};const before=await new ManualSender(()=>{}).scheduled(client as never,payload,'1');assert.ok(!before.ok&&!before.uncertain&&before.error.code==='ECONNRESET');assert.equal(sends,1);
 });
 
 test('retry policy rejects invalid waits, long waits, exhausted attempts and uncertain outcomes',()=>{

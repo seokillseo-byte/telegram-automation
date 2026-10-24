@@ -1,7 +1,11 @@
+import {randomUUID} from 'node:crypto';
+import {createPolicyCheckedJob} from './scheduled-policy';
+import {parsePolicyAction,type PolicyReply,type SendPurpose} from '../../../../packages/shared/src/send-policy';
+import {SendPolicyStore} from './send-policy-store';
 import {parseQueueAction,parseScheduledPayload,scheduleTime,type QueueReply} from '../../../../packages/shared/src/queue';
 import {QueueStore} from './queue-store';
 import {QueueRunner} from './queue-runner';
-import {parseManualAction,type ManualReply,type AttachmentData} from '../../../../packages/shared/src/manual-send';
+import {parseManualAction,type ManualReply,type SendPreview,type AttachmentData} from '../../../../packages/shared/src/manual-send';
 import {readSendAttachment} from './send-attachment';
 import {parseInboxAction,type InboxReply} from '../../../../packages/shared/src/inbox';
 import {parseAppAction,type AppReply} from '../../../../packages/shared/src/app-state';
@@ -26,6 +30,7 @@ let watchdog:NodeJS.Timeout|undefined;
 let vault:Vault;
 let research:ResearchStore;
 let queue:QueueStore;
+let policy:SendPolicyStore;
 let queueTimer:NodeJS.Timeout|undefined;
 let queueRunner:QueueRunner;
 let suspended=false;
@@ -38,6 +43,7 @@ let busy=false;
 let manualFile:AttachmentData|undefined;
 let pendingManual:((reply:ManualReply)=>void)|undefined;
 let manualDispatch=false;
+let manualPreview:SendPreview|undefined;
 let pendingSchedule:{id:string;dueAt:string;zone:string;accountId:string}|undefined;
 let pendingInbox:((reply:InboxReply)=>void)|undefined;
 let generation=0;
@@ -48,11 +54,11 @@ let lastEvent='';
 function emit(status:Status){if(status.state!==lastEvent){try{research?.addEvent(status.state);}catch{/* logging must not interrupt Telegram */}lastEvent=status.state;}latest={...status,encryption,userIdentity,userConnected:Boolean(userIdentity&&worker),inboxOnline:userIdentity?inboxOnline:undefined};if(win&&!win.isDestroyed())win.webContents.send('spike:status',latest);}
 async function decryptJob(bytes:Buffer){if(!encryption)throw Error('ENCRYPTION_UNAVAILABLE');try{return parseScheduledPayload(JSON.parse((await safeStorage.decryptStringAsync(bytes)).result));}catch{throw Error('QUEUE_PAYLOAD_INVALID');}}
 function stopWatch(){clearTimeout(watchdog);watchdog=undefined;}
-async function stopWorker(keepBusy=false,inboxError='CANCELLED'){generation++;stopWatch();queueRunner?.interrupt(inboxError,false);manualFile=undefined;pendingSchedule=undefined;if(pendingManual){pendingManual({ok:false,error:classifyError(Error(inboxError)),uncertain:manualDispatch});pendingManual=undefined;}manualDispatch=false;if(pendingInbox){pendingInbox({ok:false,error:classifyError(Error(inboxError))});pendingInbox=undefined;}inboxOnline=false;const previous=worker;worker=undefined;userIdentity=undefined;currentResults=[];if(!keepBusy)busy=false;if(previous)await previous.terminate();}
+async function stopWorker(keepBusy=false,inboxError='CANCELLED'){generation++;stopWatch();queueRunner?.interrupt(inboxError,false);manualPreview=undefined;manualFile=undefined;pendingSchedule=undefined;if(pendingManual){pendingManual({ok:false,error:classifyError(Error(inboxError)),uncertain:manualDispatch});pendingManual=undefined;}manualDispatch=false;if(pendingInbox){pendingInbox({ok:false,error:classifyError(Error(inboxError))});pendingInbox=undefined;}inboxOnline=false;const previous=worker;worker=undefined;userIdentity=undefined;currentResults=[];if(!keepBusy)busy=false;if(previous)await previous.terminate();}
 function startWatch(milliseconds=90000){stopWatch();watchdog=setTimeout(()=>{void stopWorker(false,'TIMEOUT').then(()=>emit({state:'error',error:classifyError(Error('TIMEOUT'))}));},milliseconds);}
 function getWorker(){
  if(worker)return worker;
- const current=new Worker(join(__dirname,'worker.cjs'));worker=current;
+ const current=new Worker(join(__dirname,'worker.cjs'),{workerData:{policyFile:join(app.getPath('userData'),'industry-research.sqlite')}});worker=current;
  current.on('message',async message=>{
   if(worker!==current)return;
   if(message.kind==='inbox_update'){if(!userIdentity)return;if(message.update.type==='connection'){if(message.update.connected!==inboxOnline)queueRunner.boundary(message.update.connected?'QUEUE_RECONNECTED':'QUEUE_CONNECTION_LOST');if(worker!==current)return;inboxOnline=message.update.connected;latest={...latest,inboxOnline};win.webContents.send('spike:status',latest);}win.webContents.send('inbox:update',message.update);return;}
@@ -64,12 +70,12 @@ function getWorker(){
    try{
     if(!encryption||!userIdentity)throw Error('ENCRYPTION_UNAVAILABLE');const payload=parseScheduledPayload(message.payload);if(payload.accountId!==userIdentity.id||payload.accountId!==confirmation.accountId||message.previewId!==confirmation.id)throw Error('QUEUE_ACCOUNT_MISMATCH');
     const ciphertext=await safeStorage.encryptStringAsync(JSON.stringify(payload));if(worker!==current||epoch!==generation)return;
-    const time=scheduleTime(confirmation.dueAt,confirmation.zone),job=queue.create(payload.accountId,confirmation.id,payload.recipient,time.dueAt,time.zone,ciphertext);
+    const time=scheduleTime(confirmation.dueAt,confirmation.zone),job=createPolicyCheckedJob(queue,policy,payload,confirmation.id,time.dueAt,time.zone,ciphertext);
     pendingManual=undefined;pendingSchedule=undefined;busy=false;emit({state:'queue_ready'});resolve?.({ok:true,scheduled:{id:job.id,dueAt:job.dueAt,zone:job.zone}});
    }catch(error){if(worker!==current||epoch!==generation)return;pendingManual=undefined;pendingSchedule=undefined;busy=false;emit({state:'error',error:classifyError(error)});resolve?.({ok:false,error:classifyError(error)});}return;
   }
   if(message.kind==='queue_result'){queueRunner.complete(message.id,message.runId,message.reply);return;}
-  if(message.kind==='manual'){const resolve=pendingManual;pendingManual=undefined;pendingSchedule=undefined;manualDispatch=false;busy=false;if(!message.reply.ok&&['NOT_CONNECTED','AUTH_KEY_UNREGISTERED','SESSION_REVOKED','SESSION_EXPIRED'].includes(message.reply.error.code))await stopWorker(false,message.reply.error.code);emit(message.reply.ok?{state:'manual_ready'}:{state:'error',error:message.reply.error});resolve?.(message.reply);return;}
+  if(message.kind==='manual'){if(message.reply.ok&&message.reply.preview)manualPreview=message.reply.preview;else if(manualDispatch)manualPreview=undefined;const resolve=pendingManual;pendingManual=undefined;pendingSchedule=undefined;manualDispatch=false;busy=false;if(!message.reply.ok&&['NOT_CONNECTED','AUTH_KEY_UNREGISTERED','SESSION_REVOKED','SESSION_EXPIRED'].includes(message.reply.error.code))await stopWorker(false,message.reply.error.code);emit(message.reply.ok?{state:'manual_ready'}:{state:'error',error:message.reply.error});resolve?.(message.reply);return;}
   if(message.kind==='inbox'){
    if(!message.reply.ok&&['NOT_CONNECTED','AUTH_KEY_UNREGISTERED','SESSION_REVOKED','SESSION_EXPIRED'].includes(message.reply.error.code)){await stopWorker(false,message.reply.error.code);emit({state:'error',error:message.reply.error});return;}
    const resolve=pendingInbox;pendingInbox=undefined;busy=false;emit(message.reply.ok?{state:'inbox_ready'}:{state:'error',error:message.reply.error});resolve?.(message.reply);return;
@@ -99,20 +105,32 @@ if(!app.requestSingleInstanceLock())app.quit();
 else app.whenReady().then(async()=>{
  encryption=process.platform==='win32'&&await safeStorage.isAsyncEncryptionAvailable();
  vault=new Vault(app.getPath('userData'),{available:async()=>encryption,encrypt:value=>safeStorage.encryptStringAsync(value),decrypt:async value=>(await safeStorage.decryptStringAsync(value)).result});
- research=new ResearchStore(join(app.getPath('userData'),'industry-research.sqlite'));researchScope=research.lastAccount();research.addEvent('app_started');queue=new QueueStore(join(app.getPath('userData'),'industry-research.sqlite'));queue.recover();
- queueRunner=new QueueRunner({store:()=>queue,context:()=>({accountId:userIdentity?.id,connected:Boolean(worker&&userIdentity),online:inboxOnline,suspended,busy}),decrypt:decryptJob,send:(id,payload,expiresAt,runId)=>{emit({state:'queue_sending'});startWatch();worker!.postMessage({type:'scheduled',id,payload,expiresAt,runId});},lock:value=>{busy=value;if(!value)stopWatch();},terminate:code=>{void stopWorker(false,code).then(()=>emit({state:'error',error:classifyError(Error(code))}));},changed:()=>emit({state:'queue_ready'}),error:()=>emit({state:'error',error:classifyError(Error('QUEUE_STORE_ERROR'))})});
+ research=new ResearchStore(join(app.getPath('userData'),'industry-research.sqlite'));researchScope=research.lastAccount();research.addEvent('app_started');policy=new SendPolicyStore(join(app.getPath('userData'),'industry-research.sqlite'));queue=new QueueStore(join(app.getPath('userData'),'industry-research.sqlite'));queue.recover();
+ queueRunner=new QueueRunner({authorize:payload=>policy.assertAllowed(payload.accountId,payload.recipient,payload.purpose),store:()=>queue,context:()=>({accountId:userIdentity?.id,connected:Boolean(worker&&userIdentity),online:inboxOnline,suspended,busy}),decrypt:decryptJob,send:(id,payload,expiresAt,runId)=>{emit({state:'queue_sending'});startWatch();worker!.postMessage({type:'scheduled',id,payload,expiresAt,runId});},lock:value=>{busy=value;if(!value)stopWatch();},terminate:code=>{void stopWorker(false,code).then(()=>emit({state:'error',error:classifyError(Error(code))}));},changed:()=>emit({state:'queue_ready'}),error:()=>emit({state:'error',error:classifyError(Error('QUEUE_STORE_ERROR'))})});
  win=new BrowserWindow({width:1100,height:850,minWidth:760,minHeight:600,webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  win.removeMenu();
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  win.webContents.on('will-navigate',(event,url)=>{if(url!==page)event.preventDefault();});
  win.webContents.session.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
  win.webContents.session.webRequest.onBeforeRequest((details,callback)=>callback({cancel:!details.url.startsWith(pathToFileURL(__dirname).href+'/')}));
- ipcMain.handle('queue:action',async(event,input):Promise<QueueReply>=>{
+ ipcMain.handle('policy:action',async(event,input):Promise<PolicyReply>=>{
+  if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
+  try{const action=parsePolicyAction(input),accountId=researchScope;
+   if(action.type==='list')return {ok:true,accountId,records:accountId?policy.list(accountId):[]};
+   if(!accountId)throw Error('NOT_CONNECTED');
+   if('accountId' in action){if(action.accountId!==accountId)throw Error('POLICY_ACCOUNT_MISMATCH');policy.change(action);
+    if(action.type==='revoke'||action.type==='suppress'){const marketingOnly=action.type==='revoke',code=marketingOnly?'CONSENT_REVOKED':'RECIPIENT_SUPPRESSED';queue.blockWaiting(accountId,action.target,marketingOnly,code);queueRunner.policyChanged(accountId,action.target,marketingOnly,code);if(manualDispatch&&manualPreview&&userIdentity?.id===accountId&&manualPreview.recipient.id===action.target.id&&manualPreview.recipient.peerType===action.target.peerType&&(!marketingOnly||manualPreview.purpose==='marketing'))void stopWorker(false,code).then(()=>emit({state:'error',error:classifyError(Error(code))}));}
+   }
+   return {ok:true,accountId,records:policy.list(accountId),record:policy.inspect(accountId,action.target),events:policy.events(accountId,action.target)};
+  }catch(error){return {ok:false,error:classifyError(error).message};}
+ });
+ ipcMain.handle('queue:action' ,async(event,input):Promise<QueueReply>=>{
   if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
   try{
    const action=parseQueueAction(input);if(action.type==='list')return {ok:true,jobs:queue.list(researchScope,action.reviewOnly),summary:queue.summary(researchScope)};
    if(!researchScope)throw Error('NOT_CONNECTED');
    if(action.type==='detail'){const record=queue.detail(researchScope,action.id),payload=await decryptJob(record.payload);if(payload.accountId!==researchScope)throw Error('QUEUE_ACCOUNT_MISMATCH');return {ok:true,detail:{job:record.job,text:payload.text,events:record.events}};}
+   if(action.type==='resume'||action.type==='reschedule'){const job=queue.detail(researchScope,action.id).job;policy.assertAllowed(researchScope,job.recipient,job.purpose??'personal');}
    queue.change(researchScope,action.id,action.type,action.type==='reschedule'?action.dueAt:undefined,action.type==='reschedule'?action.zone:undefined);return {ok:true,jobs:queue.list(researchScope),summary:queue.summary(researchScope)};
   }catch(error){return {ok:false,error:classifyError(error).message};}
  });
@@ -132,6 +150,7 @@ else app.whenReady().then(async()=>{
     busy=false;emit({state:'manual_ready'});const {bytes:_,...attachment}=selected;return {ok:true,attachment};
    }
    if(action.type==='preview'&&action.fileId&&manualFile?.id!==action.fileId)throw Error('SEND_FILE_EXPIRED');
+   if(action.type==='confirm'&&manualPreview?.id===action.id)policy.assertAllowed(userIdentity.id,manualPreview.recipient,manualPreview.purpose??'personal');
    pendingSchedule=action.type==='schedule'?{id:action.id,dueAt:action.dueAt,zone:action.zone,accountId:userIdentity.id}:undefined;manualDispatch=action.type==='confirm';startWatch(action.type==='confirm'?180000:90000);
    return await new Promise<ManualReply>(resolve=>{pendingManual=resolve;try{worker!.postMessage({type:'manual',action,attachment:action.type==='preview'&&action.fileId?manualFile:undefined});}catch(error){pendingManual=undefined;pendingSchedule=undefined;manualDispatch=false;busy=false;stopWatch();emit({state:'error',error:classifyError(error)});resolve({ok:false,error:classifyError(error)});}});
   }catch(error){if(ownBusy&&epoch===generation){busy=false;emit({state:'error',error:classifyError(error)});}return {ok:false,error:classifyError(error)};}
@@ -269,7 +288,7 @@ else app.whenReady().then(async()=>{
     return {ok:true,type:'messages',key:action.key,messages:fixtureMessages};
    });
    const fixtureReplyTemplate=research.saveTemplate({name:'Mẫu reply kiểm thử',body:'Chào {{ten}}, sản phẩm {{san_pham}}.'});
-   const fixtureStatus={state:'connected',userConnected:true,inboxOnline:true,userIdentity:{id:'1',name:'Kiểm thử',kind:'user'}};
+   const fixtureStatus={state:'connected',userConnected:true,inboxOnline:true,userIdentity:{id:'1',name:'Kiểm thử',kind:'user' as const,peerType:'user' as const}};
    win.webContents.send('spike:status',fixtureStatus);
    await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,150))`);
    const opened=await win.webContents.executeJavaScript(`(async()=>{document.querySelector('[data-testid="inbox-refresh"]').click();await new Promise(resolve=>setTimeout(resolve,200));document.querySelector('.dialog-row')?.click();await new Promise(resolve=>setTimeout(resolve,200));return document.querySelector('.inbox-message')?.textContent.includes('Tin ban đầu');})()`);
@@ -285,12 +304,12 @@ else app.whenReady().then(async()=>{
    if(!await win.webContents.executeJavaScript(`document.querySelectorAll('.inbox-message').length===0`))throw Error('SMOKE_FAILED');
    win.webContents.send('spike:status',fixtureStatus);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,500))`);
    if(fixtureReads!==beforeReconnect+2||!await win.webContents.executeJavaScript(`document.querySelector('.inbox-message')?.textContent.includes('Đã sửa <script>')`))throw Error('SMOKE_FAILED');console.log('INBOX_RECONNECT_REFRESH_PASS');
-   let fixtureManualSends=0,fixtureManualToken=false,fixtureManualUncertain=false,fixtureRightsBlocked=true,fixtureManualRate=false;let fixtureReplyId:number|undefined;let fixtureScheduleText='';
+   let fixtureManualSends=0,fixtureManualToken=false,fixtureManualUncertain=false,fixtureRightsBlocked=true,fixtureManualRate=false;let fixtureReplyId:number|undefined;let fixtureScheduleText='';let fixtureManualPurpose:SendPurpose='personal';
    ipcMain.removeHandler('manual:action');ipcMain.handle('manual:action',async(_event,input)=>{
     const action=parseManualAction(input);
     if(action.type==='capabilities')return {ok:true,capabilities:{recipient:fixtureStatus.userIdentity,checkedAt:new Date().toISOString(),text:{state:fixtureRightsBlocked?'blocked':'allowed',reason:'Quyền kiểm thử',code:fixtureRightsBlocked?'CHAT_SEND_PLAIN_FORBIDDEN':undefined},photo:{state:'allowed',reason:'Quyền kiểm thử'},document:{state:'unknown',reason:'Chưa xác định'},notes:['Thông tin kiểm thử, chưa gửi tin.']}};
-    if(action.type==='schedule'&&fixtureManualToken){fixtureManualToken=false;const recipient={id:'1',name:'Kiểm thử',kind:'user' as const,peerType:'user' as const};const payload=parseScheduledPayload({accountId:'1',recipient,peer:{type:'self'},text:fixtureScheduleText,randomId:'1234567',purpose:'personal'});const encrypted=await safeStorage.encryptStringAsync(JSON.stringify(payload));const job=queue.create('1',action.id,recipient,action.dueAt,action.zone,encrypted);return {ok:true,scheduled:{id:job.id,dueAt:job.dueAt,zone:job.zone}};}
-    if(action.type==='preview'){fixtureManualToken=true;fixtureScheduleText=action.text;fixtureReplyId=action.replyTo;return {ok:true,preview:{id:'00000000-0000-4000-8000-000000000007',recipient:fixtureStatus.userIdentity,text:action.text,reply:action.replyTo?{id:action.replyTo,text:fixtureMessages[0].text}:undefined,expiresAt:new Date(Date.now()+300000).toISOString()}};}
+    if(action.type==='schedule'&&fixtureManualToken){fixtureManualToken=false;const recipient={id:'1',name:'Kiểm thử',kind:'user' as const,peerType:'user' as const};const payload=parseScheduledPayload({accountId:'1',recipient,peer:{type:'self'},text:fixtureScheduleText,randomId:'1234567',purpose:fixtureManualPurpose});const encrypted=await safeStorage.encryptStringAsync(JSON.stringify(payload));const job=createPolicyCheckedJob(queue,policy,payload,action.id,action.dueAt,action.zone,encrypted);return {ok:true,scheduled:{id:job.id,dueAt:job.dueAt,zone:job.zone}};}
+    if(action.type==='preview'){fixtureManualPurpose=action.purpose??'personal';try{policy.assertAllowed('1',fixtureStatus.userIdentity,fixtureManualPurpose);}catch(error){return {ok:false,error:classifyError(error)};}fixtureManualToken=true;fixtureScheduleText=action.text;fixtureReplyId=action.replyTo;return {ok:true,preview:{id:randomUUID(),purpose:fixtureManualPurpose,recipient:fixtureStatus.userIdentity,text:action.text,reply:action.replyTo?{id:action.replyTo,text:fixtureMessages[0].text}:undefined,expiresAt:new Date(Date.now()+300000).toISOString()}};}
     if(action.type==='confirm'&&fixtureManualToken){fixtureManualToken=false;fixtureManualSends++;return fixtureManualRate?{ok:false,error:{code:'RATE_LIMIT',message:'Telegram yêu cầu chờ.',retryAfter:2}}:fixtureManualUncertain?{ok:false,error:classifyError(Error('TIMEOUT')),uncertain:true}:{ok:true,sent:{id:77,recipient:fixtureStatus.userIdentity}};}
     return {ok:false,error:classifyError(Error('SEND_PREVIEW_EXPIRED'))};
    });
@@ -328,7 +347,7 @@ else app.whenReady().then(async()=>{
    await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,2400))`);
    if(Number(fixtureManualSends)!==4||!await win.webContents.executeJavaScript(`!document.querySelector('[data-testid="send-preview"]').disabled&&document.querySelector('[data-testid="send-text"]').value==='Giữ bản soạn khi chưa rõ kết quả'`))throw Error('SMOKE_FAILED');console.log('SEND_RATE_LIMIT_GUARD_PASS');
    if(process.platform==='win32'){
-    const directory=await mkdtemp(join(tmpdir(),'telegram-queue-smoke-')),previousQueue=queue,previousScope=researchScope;queue=new QueueStore(join(directory,'queue.sqlite'));researchScope='1';
+    const directory=await mkdtemp(join(tmpdir(),'telegram-queue-smoke-')),previousQueue=queue,previousScope=researchScope,previousPolicy=policy;queue=new QueueStore(join(directory,'queue.sqlite'));policy=new SendPolicyStore(join(directory,'queue.sqlite'));researchScope='1';
     try{
      const schedulingOk=await win.webContents.executeJavaScript(`(async()=>{document.querySelector('[data-testid="send-preview"]').click();await new Promise(resolve=>setTimeout(resolve,150));document.querySelector('[data-testid="schedule-review"]').click();await new Promise(resolve=>setTimeout(resolve,100));if(!document.querySelector('[data-testid="schedule-summary"]'))return false;const confirm=document.querySelector('[data-testid="schedule-confirm"]');confirm.click();confirm.click();await new Promise(resolve=>setTimeout(resolve,350));document.querySelector('nav button[data-page="schedule"]').click();await new Promise(resolve=>setTimeout(resolve,250));return Boolean(document.querySelector('[data-job-state="pending"]'));})()`);
      if(!schedulingOk||Number(fixtureManualSends)!==4||queue.list('1').length!==1)throw Error('SMOKE_FAILED');
@@ -348,10 +367,15 @@ else app.whenReady().then(async()=>{
      queue.close();queue=new QueueStore(join(directory,'queue.sqlite'));queue.recover(recoveryAt+4000);
      const reviewOk=await win.webContents.executeJavaScript(`(async()=>{document.querySelector('[data-testid="queue-refresh"]').click();await new Promise(resolve=>setTimeout(resolve,200));if(!document.querySelector('[data-testid="queue-recovery-summary"]')?.textContent.includes('1 lịch quá hạn/gián đoạn · 1 lịch chưa rõ kết quả'))return false;document.querySelector('[data-testid="queue-review-filter"]').click();await new Promise(resolve=>setTimeout(resolve,200));const uncertain=document.querySelector('[data-job-state="uncertain"]');if(!uncertain||uncertain.querySelectorAll('button').length!==1||!uncertain.textContent.includes('sẽ không tự gửi lại'))return false;if(document.querySelectorAll('[data-job-state]').length!==2)return false;const missed=document.querySelector('[data-job-state="needs_review"]');[...missed.querySelectorAll('button')].find(b=>b.textContent==='Chọn giờ mới').click();await new Promise(resolve=>setTimeout(resolve,100));const original=window.confirm;window.confirm=()=>true;document.querySelector('[data-testid="queue-reschedule-confirm"]').click();window.confirm=original;await new Promise(resolve=>setTimeout(resolve,200));return !document.querySelector('[data-job-state="needs_review"]')&&Boolean(document.querySelector('[data-job-state="uncertain"]'));})()`);
      if(!reviewOk||queue.detail('1',missedJob.id).job.state!=='pending'||queue.detail('1',interruptedJob.id).job.state!=='uncertain'||Number(fixtureManualSends)!==4)throw Error('SMOKE_FAILED');console.log('QUEUE_RECOVERY_REVIEW_PASS');
+     const consentUi=await win.webContents.executeJavaScript(`(async()=>{const wait=()=>new Promise(resolve=>setTimeout(resolve,180));const fill=(selector,value)=>{const input=document.querySelector(selector);Object.getOwnPropertyDescriptor(input instanceof HTMLSelectElement?HTMLSelectElement.prototype:input instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event(input instanceof HTMLSelectElement?'change':'input',{bubbles:true}));};document.querySelector('nav button[data-page="inbox"]').click();await wait();fill('[data-testid="send-purpose"]','marketing');fill('[data-testid="send-text"]','Marketing fixture opt-in');await wait();document.querySelector('[data-testid="send-preview"]').click();await wait();if(!document.querySelector('[data-testid="send-error-help"]')?.textContent.includes('CONSENT_REQUIRED'))return false;document.querySelector('nav button[data-page="contacts"]').click();await wait();fill('[data-testid="policy-peer-id"]','1');fill('[data-testid="policy-peer-name"]','Kiểm thử');await wait();document.querySelector('[data-testid="policy-inspect"]').click();await wait();fill('[data-testid="policy-source"]','Fixture explicit opt-in');document.querySelector('[data-testid="policy-consent-confirm"]').click();await wait();const original=window.confirm;window.confirm=()=>true;document.querySelector('[data-testid="policy-grant"]').click();window.confirm=original;await wait();if(!document.querySelector('[data-testid="policy-current"]')?.textContent.includes('Đã ghi nhận đồng ý'))return false;document.querySelector('nav button[data-page="inbox"]').click();await wait();document.querySelector('[data-testid="send-preview"]').click();await wait();document.querySelector('[data-testid="schedule-review"]').click();await wait();document.querySelector('[data-testid="schedule-confirm"]').click();await wait();return true;})()`);
+     const marketingJob=queue.list('1').find(row=>row.purpose==='marketing');if(!consentUi||!marketingJob||marketingJob.state!=='pending')throw Error('SMOKE_FAILED');
+     const revokeUi=await win.webContents.executeJavaScript(`(async()=>{const wait=()=>new Promise(resolve=>setTimeout(resolve,180));const fill=(selector,value)=>{const input=document.querySelector(selector);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));};document.querySelector('nav button[data-page="contacts"]').click();await wait();fill('[data-testid="policy-peer-id"]','1');fill('[data-testid="policy-peer-name"]','Kiểm thử');await wait();document.querySelector('[data-testid="policy-inspect"]').click();await wait();for(const type of ['revoke','suppress','unsuppress']){fill('[data-testid="policy-source"]','Fixture '+type);await wait();const original=window.confirm;window.confirm=()=>true;document.querySelector('[data-testid="policy-'+type+'"]').click();window.confirm=original;await wait();}if(!document.querySelector('[data-testid="policy-current"]')?.textContent.includes('Đã rút đồng ý')||!document.querySelector('[data-testid="policy-current"]')?.textContent.includes('Chặn gửi: Không'))return false;const rejected=await window.spike.policy({type:'grant',accountId:'2',target:{id:'1',peerType:'user',name:'Wrong account'},source:'Fixture'});return !rejected.ok;})()`);
+     if(!revokeUi||queue.detail('1',marketingJob.id).job.state!=='cancelled'||queue.detail('1',marketingJob.id).job.errorCode!=='CONSENT_REVOKED'||policy.inspect('1',{id:'1',peerType:'user',name:'Fixture'}).consent!=='revoked'||policy.list('2').length||Number(fixtureManualSends)!==4)throw Error('SMOKE_FAILED');console.log('SEND_CONSENT_SUPPRESSION_PASS');
+
      await win.webContents.executeJavaScript(`document.querySelector('nav button[data-page="inbox"]').click()`);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,100))`);
 
 
-    }finally{queue.close();queue=previousQueue;researchScope=previousScope;await rm(directory,{recursive:true,force:true});}
+    }finally{queue.close();policy.close();policy=previousPolicy;queue=previousQueue;researchScope=previousScope;await rm(directory,{recursive:true,force:true});}
    }
    win.webContents.send('spike:status',{state:'disconnected',userConnected:false});
 
@@ -408,4 +432,4 @@ else app.whenReady().then(async()=>{
  }
 }).catch(error=>{console.error('APP_START_FAILED',classifyError(error).code);if(!process.argv.includes('--smoke-test'))dialog.showErrorBox('Không thể mở ứng dụng',classifyError(error).message);app.exit(1);});
 app.on('window-all-closed',()=>app.quit());
-app.on('before-quit',()=>{clearInterval(queueTimer);void stopWorker(false,'QUEUE_APP_CLOSED');queue?.close();research?.close();});
+app.on('before-quit',()=>{clearInterval(queueTimer);void stopWorker(false,'QUEUE_APP_CLOSED');queue?.close();policy?.close();research?.close();});

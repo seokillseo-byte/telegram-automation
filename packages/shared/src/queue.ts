@@ -1,8 +1,9 @@
+import {sendPurpose,type SendPurpose} from './send-policy';
 import type {Identity} from './protocol';
 export type JobState='pending'|'retry_wait'|'paused'|'running'|'sent'|'failed'|'uncertain'|'needs_review'|'cancelled';
 export type ScheduledPeer={type:'self'}|{type:'user'|'channel';id:string;accessHash:string}|{type:'chat';id:string};
-export type ScheduledPayload={accountId:string;recipient:Identity;peer:ScheduledPeer;text:string;randomId:string;purpose:'personal'};
-export type QueueJob={id:string;accountId:string;recipient:Identity;dueAt:string;zone:string;createdAt:string;state:JobState;attempts:number;nextAttemptAt?:string;remoteId?:number;errorCode?:string};
+export type ScheduledPayload={accountId:string;recipient:Identity;peer:ScheduledPeer;text:string;randomId:string;purpose:SendPurpose};
+export type QueueJob={id:string;accountId:string;recipient:Identity;dueAt:string;zone:string;createdAt:string;state:JobState;attempts:number;purpose?:SendPurpose;nextAttemptAt?:string;remoteId?:number;errorCode?:string};
 export type QueueEvent={at:string;state:JobState;code?:string};
 export type QueueAction={type:'list';reviewOnly?:boolean}|{type:'detail';id:string}|{type:'pause'|'resume'|'cancel';id:string}|{type:'reschedule';id:string;dueAt:string;zone:string};
 export type QueueReply={ok:true;jobs?:QueueJob[];summary?:{needsReview:number;uncertain:number};detail?:{job:QueueJob;text:string;events:QueueEvent[]}}|{ok:false;error:string};
@@ -27,8 +28,8 @@ export function parseQueueAction(value:unknown):QueueAction{
 }
 export function parseScheduledPayload(value:unknown):ScheduledPayload{
  if(!value||typeof value!=='object')throw Error('QUEUE_PAYLOAD_INVALID');const v=value as ScheduledPayload;
- if(v.purpose!=='personal'||typeof v.accountId!=='string'||!/^\d+$/.test(v.accountId)||!v.recipient||typeof v.recipient.id!=='string'||typeof v.recipient.name!=='string'||!/^\d+$/.test(v.recipient.id)||!['user','bot','group','channel'].includes(v.recipient.kind)||typeof v.text!=='string'||!v.text.trim()||v.text.length>4096||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v.text)||typeof v.randomId!=='string'||!/^[-]?\d{1,20}$/.test(v.randomId)||!v.peer)throw Error('QUEUE_PAYLOAD_INVALID');
- if(v.peer.type==='self'){if(v.recipient.peerType!=='user'||v.recipient.id!==v.accountId)throw Error('QUEUE_PAYLOAD_INVALID');}
+ if(!['personal','marketing'].includes(v.purpose)||typeof v.accountId!=='string'||!/^\d+$/.test(v.accountId)||!v.recipient||typeof v.recipient.id!=='string'||typeof v.recipient.name!=='string'||!/^\d+$/.test(v.recipient.id)||!['user','bot','group','channel'].includes(v.recipient.kind)||typeof v.text!=='string'||!v.text.trim()||v.text.length>4096||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v.text)||typeof v.randomId!=='string'||!/^[-]?\d{1,20}$/.test(v.randomId)||!v.peer)throw Error('QUEUE_PAYLOAD_INVALID');
+ sendPurpose(v.purpose);if(v.peer.type==='self'){if(v.recipient.peerType!=='user'||v.recipient.id!==v.accountId)throw Error('QUEUE_PAYLOAD_INVALID');}
  else{if(!['user','chat','channel'].includes(v.peer.type)||!/^\d+$/.test(v.peer.id)||v.peer.id!==v.recipient.id||v.peer.type!==v.recipient.peerType||v.peer.type!=='chat'&&!/^[-]?\d{1,20}$/.test(v.peer.accessHash))throw Error('QUEUE_PAYLOAD_INVALID');}return v;
 }
 
