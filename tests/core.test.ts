@@ -53,3 +53,14 @@ test('forget waits for an in-flight save and leaves no session behind',async()=>
   await assert.rejects(vault.load(),/NO_SESSION/);
  }finally{await rm(directory,{recursive:true,force:true});}
 });
+test('login diagnostics distinguish credential, network and packaged worker failures',()=>{
+ for(const code of ['API_ID_INVALID','PHONE_NUMBER_INVALID','PHONE_NUMBER_BANNED','PHONE_NUMBER_FLOOD','UPDATE_APP_TO_LOGIN']){
+  assert.equal(classifyError({errorMessage:code}).code,code);
+ }
+ assert.equal(classifyError({code:'ECONNRESET',message:'private phone number'}).code,'ECONNRESET');
+ const moduleError=classifyError({code:'MODULE_NOT_FOUND',message:'Cannot find module C:/Users/private-name/secret'});
+ assert.equal(moduleError.code,'WORKER_DEPENDENCY_MISSING');
+ assert.ok(!JSON.stringify(moduleError).includes('private-name'));
+ assert.equal(classifyError(new TypeError('secret api hash')).code,'CLIENT_TYPE_ERROR');
+ assert.ok(!JSON.stringify(classifyError(new TypeError('secret api hash'))).includes('secret api hash'));
+});

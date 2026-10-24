@@ -61,3 +61,8 @@ Node 24 và pnpm 11.25.0:
 - pnpm dist:win (trên Windows)
 
 Bản Linux không được cho phép lưu phiên trong spike Windows này. Không chạy bằng --no-sandbox để né lỗi môi trường.
+
+## Bản 0.0.2 — Kiểm tra lỗi đăng nhập
+Bản này bổ sung thông báo lỗi API/số điện thoại/mạng/thành phần đóng gói và hiển thị bước đang xử lý. Windows CI kiểm tra thêm khởi tạo Telegram worker trong ứng dụng đã đóng gói, không dùng credential thật.
+Nếu chưa đăng nhập được, ghi lại **phiên bản + bước + mã lỗi** đang hiện. Không gửi API Hash/OTP/token. API Hash được xóa khỏi ô nhập sau khi bấm đăng nhập là hành vi dự kiến; không chứng minh bạn chưa nhập.
+Chưa thể xác định nguyên nhân của ảnh lỗi TELEGRAM_ERROR từ bản 0.0.1 chỉ dựa trên ảnh. Không coi việc thêm chẩn đoán là bằng chứng đăng nhập thật đã được sửa thành công.

@@ -1,6 +1,6 @@
 export type Identity = {id:string; name:string; username?:string; kind:'user'|'bot'|'group'|'channel'};
 export type Failure = {code:string; message:string; retryAfter?:number};
-export type Status = {state:string; identity?:Identity; error?:Failure; queryResults?:Identity[]; encryption?:boolean};
+export type Status = {state:string; identity?:Identity; error?:Failure; queryResults?:Identity[]; encryption?:boolean; stage?:string};
 export type Action =
  | {type:'login';apiId:number;apiHash:string;phone:string}
  | {type:'answer';value:string}
@@ -21,11 +21,18 @@ export function parseAction(value:unknown):Action {
  }
 }
 export function classifyError(error:unknown):Failure {
- const e=error as {errorMessage?:string;message?:string;seconds?:number};
- const code=String(e?.errorMessage??e?.message??'UNKNOWN');
+ const e=error as {errorMessage?:string;message?:string;seconds?:number;code?:string;name?:string};
+ let code=String(e?.errorMessage??e?.message??'UNKNOWN');
+ const networkCode=String(e?.code??'');
+ if(['ETIMEDOUT','ESOCKETTIMEDOUT','ECONNRESET','ECONNREFUSED','ENETUNREACH','EHOSTUNREACH','EAI_AGAIN','ENOTFOUND'].includes(networkCode))code=networkCode;
+ if(/^(?:TIMEOUT|Timeout|Connection timed out|Not connected|Cannot send requests while disconnected)$/i.test(code))code='NETWORK_TIMEOUT';
+ if(code.includes('Cannot find module')||networkCode==='MODULE_NOT_FOUND')code='WORKER_DEPENDENCY_MISSING';
+ if(code.includes('Could not connect')||code.includes('Connection closed'))code='CONNECTION_FAILED';
+ if(code==='AUTH_USER_CANCEL')code='CANCELLED';
  const wait=code.match(/(?:FLOOD_WAIT|FLOOD_PREMIUM_WAIT|SLOWMODE_WAIT)_?(\d+)?/);
  if(wait){const seconds=Number(e?.seconds??wait[1]??60);return {code:'RATE_LIMIT',message:'Telegram yêu cầu chờ trước khi thử lại.',retryAfter:seconds};}
- const map:Record<string,string>={INPUT_INVALID:'Thông tin nhập chưa hợp lệ.',PHONE_NUMBER_UNOCCUPIED:'Số điện thoại chưa có tài khoản. Hãy tạo tài khoản bằng Telegram chính thức.',PHONE_CODE_INVALID:'Mã xác minh không đúng. Hãy bắt đầu đăng nhập lại.',PHONE_CODE_EXPIRED:'Mã đã hết hạn. Hãy bắt đầu lại.',PASSWORD_HASH_INVALID:'Mật khẩu hai bước không đúng.',SESSION_REVOKED:'Phiên đã bị thu hồi. Hãy đăng nhập lại.',AUTH_KEY_UNREGISTERED:'Phiên không còn hợp lệ. Hãy đăng nhập lại.',USERNAME_NOT_OCCUPIED:'Không tìm thấy username.',USERNAME_INVALID:'Username không hợp lệ.',BOT_UNAUTHORIZED:'Token bot không hợp lệ.',BOT_RATE_LIMIT:'Bot đang bị giới hạn. Hãy thử lại sau.',ENCRYPTION_UNAVAILABLE:'Mã hóa Windows chưa sẵn sàng. Không lưu bí mật.',NOT_CONNECTED:'Hãy kết nối tài khoản người dùng trước.',BUSY:'Đang có thao tác khác. Hãy chờ hoàn tất.',NO_SESSION:'Chưa có phiên đã lưu.',TIMEOUT:'Kết nối quá thời gian chờ. Kiểm tra mạng rồi thử lại.',CANCELLED:'Thao tác đã hủy.',BOT_NETWORK:'Không kết nối được Bot API.',BOT_API:'Bot API trả lỗi.',QUERY_TOO_SHORT:'Telegram từ chối truy vấn quá ngắn.'};
+ const map:Record<string,string>={API_ID_INVALID:'API ID và API Hash không khớp hoặc không hợp lệ. Kiểm tra lại cặp giá trị tại my.telegram.org.',API_ID_PUBLISHED_FLOOD:'Telegram đã hạn chế API ID này. Kiểm tra ứng dụng API của bạn trên my.telegram.org.',PHONE_NUMBER_INVALID:'Telegram từ chối số điện thoại. Nhập theo dạng +84… và bỏ số 0 đầu.',PHONE_NUMBER_BANNED:'Telegram báo số điện thoại này bị khóa.',PHONE_NUMBER_FLOOD:'Telegram đang hạn chế số lần đăng nhập của số điện thoại này. Dừng thử liên tục và chờ Telegram cho phép.',PHONE_PASSWORD_FLOOD:'Telegram đang giới hạn số lần nhập mật khẩu. Hãy chờ rồi thử lại.',AUTH_RESTART:'Telegram yêu cầu bắt đầu lại quy trình đăng nhập.',UPDATE_APP_TO_LOGIN:'Telegram yêu cầu cập nhật thành phần đăng nhập của ứng dụng.',CONNECTION_FAILED:'Không thiết lập được kết nối tới Telegram. Kiểm tra mạng hoặc thử bằng mạng khác.',NETWORK_TIMEOUT:'Kết nối Telegram quá thời gian chờ. Kiểm tra mạng trước khi thử lại.',ETIMEDOUT:'Không kết nối tới Telegram trong thời gian cho phép.',ESOCKETTIMEDOUT:'Kết nối Telegram quá thời gian chờ.',ECONNRESET:'Kết nối Telegram bị ngắt. Kiểm tra mạng rồi thử lại.',ECONNREFUSED:'Kết nối tới Telegram bị từ chối.',ENETUNREACH:'Không có đường mạng tới Telegram.',EHOSTUNREACH:'Không truy cập được máy chủ Telegram.',EAI_AGAIN:'Tra cứu địa chỉ máy chủ tạm thời thất bại.',ENOTFOUND:'Không tìm thấy địa chỉ máy chủ Telegram.',WORKER_FAILED:'Bộ phận kết nối không khởi động được. Cần cập nhật bộ cài.',WORKER_EXIT:'Bộ phận kết nối đã dừng bất thường. Hãy mở lại ứng dụng.',WORKER_DEPENDENCY_MISSING:'Bộ cài thiếu thành phần kết nối Telegram. Cần cập nhật bộ cài.',INPUT_INVALID:'Thông tin nhập chưa hợp lệ.',PHONE_NUMBER_UNOCCUPIED:'Số điện thoại chưa có tài khoản. Hãy tạo tài khoản bằng Telegram chính thức.',PHONE_CODE_INVALID:'Mã xác minh không đúng. Hãy bắt đầu đăng nhập lại.',PHONE_CODE_EXPIRED:'Mã đã hết hạn. Hãy bắt đầu lại.',PASSWORD_HASH_INVALID:'Mật khẩu hai bước không đúng.',SESSION_REVOKED:'Phiên đã bị thu hồi. Hãy đăng nhập lại.',AUTH_KEY_UNREGISTERED:'Phiên không còn hợp lệ. Hãy đăng nhập lại.',USERNAME_NOT_OCCUPIED:'Không tìm thấy username.',USERNAME_INVALID:'Username không hợp lệ.',BOT_UNAUTHORIZED:'Token bot không hợp lệ.',BOT_RATE_LIMIT:'Bot đang bị giới hạn. Hãy thử lại sau.',ENCRYPTION_UNAVAILABLE:'Mã hóa Windows chưa sẵn sàng. Không lưu bí mật.',NOT_CONNECTED:'Hãy kết nối tài khoản người dùng trước.',BUSY:'Đang có thao tác khác. Hãy chờ hoàn tất.',NO_SESSION:'Chưa có phiên đã lưu.',TIMEOUT:'Kết nối quá thời gian chờ. Kiểm tra mạng rồi thử lại.',CANCELLED:'Thao tác đã hủy.',BOT_NETWORK:'Không kết nối được Bot API.',BOT_API:'Bot API trả lỗi.',QUERY_TOO_SHORT:'Telegram từ chối truy vấn quá ngắn.'};
  if(map[code])return {code,message:map[code]};
+ if(e?.name==='TypeError')return {code:'CLIENT_TYPE_ERROR',message:'Thành phần kết nối gặp lỗi tương thích. Gửi mã lỗi và bước xử lý đang hiển thị để kiểm tra.'};
  return {code:'TELEGRAM_ERROR',message:'Thao tác không thành công. Kiểm tra kết nối hoặc thông tin đăng nhập rồi thử lại.'};
 }

@@ -27,13 +27,13 @@ function getWorker(){
   if(worker!==current)return;
   stopWatch();
   if(message.kind==='status'){
-   if(['awaiting_code','awaiting_password'].includes(message.status.state)){startWatch();}else if(message.status.state==='searching'){startWatch();}else{busy=false;}
+   if(['awaiting_code','awaiting_password'].includes(message.status.state)){startWatch();}else if(['searching','connecting'].includes(message.status.state)){startWatch();}else{busy=false;}
    emit(message.status);
   } else if(message.kind==='session'){
    try{await vault.save(message.value);if(worker!==current)return;busy=false;emit({state:'connected',identity:message.identity});}catch(error){await stopWorker();emit({state:'error',error:classifyError(error)});}
   } else if(message.kind==='logged_out'){await vault.clear();busy=false;emit({state:'disconnected'});}
  });
- current.on('error',()=>{void stopWorker().then(()=>emit({state:'error',error:classifyError(Error('WORKER_FAILED'))}));});
+ current.on('error',error=>{const mapped=classifyError(error);void stopWorker().then(()=>emit({state:'error',stage:'starting_worker',error:mapped.code==='TELEGRAM_ERROR'?classifyError(Error('WORKER_FAILED')):mapped}));});
  current.on('exit',()=>{if(worker===current){worker=undefined;stopWatch();busy=false;emit({state:'error',error:classifyError(Error('WORKER_EXIT'))});}});
  return current;
 }
@@ -90,8 +90,15 @@ else app.whenReady().then(async()=>{
      await probe.clear();console.log('PHASE0_WINDOWS_DPAPI_PASS');
     }finally{await rm(directory,{recursive:true,force:true});}
    }
+   await new Promise<void>((resolve,reject)=>{
+    const probe=new Worker(join(__dirname,'worker.cjs'));
+    const timeout=setTimeout(()=>{void probe.terminate();reject(Error('WORKER_PROBE_TIMEOUT'));},15000);
+    probe.once('error',error=>{clearTimeout(timeout);reject(Error(classifyError(error).code));});
+    probe.on('message',message=>{if(message.kind!=='probe')return;clearTimeout(timeout);void probe.terminate();if(message.ok){console.log('PHASE0_WORKER_PROBE_PASS');resolve();}else reject(Error(message.error.code));});
+    probe.postMessage({type:'probe'});
+   });
    console.log('PHASE0_SMOKE_PASS');app.exit(0);
-  }catch{console.error('PHASE0_SMOKE_FAIL');app.exit(1);}
+  }catch(error){console.error('PHASE0_SMOKE_FAIL',classifyError(error).code);app.exit(1);}
  }
 }).catch(()=>{console.error('APP_START_FAILED');app.exit(1);});
 app.on('window-all-closed',()=>app.quit());
