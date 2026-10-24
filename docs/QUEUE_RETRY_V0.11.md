@@ -10,7 +10,7 @@ Người dùng đã xác nhận gửi trực tiếp tới tài khoản thành c�
 - Timeout, mất mạng, mất ACK **sau khi gọi SendMessage**: `Chưa rõ kết quả`, không tự thử lại. Không có nút gửi lại cưỡng bức.
 - Lỗi quyền, riêng tư, chặn, `PEER_FLOOD`, phiên hết hạn hoặc payload lỗi: kết thúc thất bại, không tự thử lại.
 - Mỗi lần thử dùng lại nội dung, người nhận đã ghim và cùng `randomId`. Quyền gửi/tài khoản được kiểm tra lại. Giới hạn retry của SDK cho riêng lệnh gửi lịch được đặt thành 1 rồi khôi phục; SDK vẫn quản lý truyền tải MTProto.
-- Hiển thị số lần thử và thời điểm thử lại trong Lịch gửi. Có thể Tạm dừng / Tiếp tục / Hủy khi chưa thực thi lần tiếp theo. Tiếp tục chỉ hợp lệ nếu mốc cũ còn cách trên 30 giây. Không sửa giờ/nội dung/người nhận của lịch đã thử.
+- Hiển thị số lần thử và thời điểm thử lại trong Lịch gửi. Có thể Tạm dừng / Tiếp tục / Hủy khi chưa thực thi lần tiếp theo. Tiếp tục lịch chưa thử khi mốc cũ còn cách trên 30 giây; lịch chờ thử lại chỉ cần mốc thử tiếp theo vẫn ở tương lai. Không sửa giờ/nội dung/người nhận của lịch đã thử.
 - Khi đóng app/sleep/mất kết nối rồi quay lại sau mốc thử: cần kiểm tra, không tự gửi bù. Nếu lần trước đang chạy khi app dừng: chưa rõ kết quả. Lịch đã thử nhưng lỡ mốc tiếp theo chỉ được hủy; kiểm tra Telegram trước khi chủ động tạo lịch khác.
 
 ## Test dễ làm trên Windows

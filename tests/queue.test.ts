@@ -66,7 +66,7 @@ test('classified retries persist waits, block account, reuse payload and stop af
   assert.equal(q.detail('1',job.id).job.state,'retry_wait');assert.equal(q.claim('1',due+40000),undefined);
   q.close();q=new QueueStore(file);q.recover(due+10000);assert.equal(q.claim('1',due+60000),undefined);
   const retry=q.claim('1',due+61000);assert.equal(retry?.id,job.id);assert.equal(retry?.attempts,2);assert.equal(q.detail('1',job.id).payload.toString(),'fixed encrypted payload');
-  q.reject('1',job.id,{code:'TIMEOUT'},false,due+61000);q.change('1',job.id,'pause');assert.equal(q.claim('1',due+181000),undefined);q.change('1',job.id,'cancel');assert.equal(q.detail('1',job.id).job.state,'cancelled');q.overdue(due+181000);assert.equal(q.detail('1',other.id).job.state,'needs_review');
+  q.reject('1',job.id,{code:'TIMEOUT'},false,due+61000);q.change('1',job.id,'pause');q.change('1',job.id,'resume',undefined,undefined,due+180000);assert.equal(q.detail('1',job.id).job.nextAttemptAt,new Date(due+181000).toISOString());q.change('1',job.id,'pause');assert.equal(q.claim('1',due+181000),undefined);q.change('1',job.id,'cancel');assert.equal(q.detail('1',job.id).job.state,'cancelled');q.overdue(due+181000);assert.equal(q.detail('1',other.id).job.state,'needs_review');
   const final=q.create('2',uid(43),user,new Date(due).toISOString(),'UTC',Buffer.from('fixed'));
   for(let attempt=1,at=due;attempt<=3;attempt++){assert.equal(q.claim('2',at)?.attempts,attempt);q.reject('2',final.id,{code:'RATE_LIMIT',retryAfter:1},false,at);at+=2000;}
   assert.equal(q.detail('2',final.id).job.state,'failed');assert.equal(q.claim('2',due+10000),undefined);

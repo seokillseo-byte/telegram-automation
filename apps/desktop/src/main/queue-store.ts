@@ -36,7 +36,7 @@ export class QueueStore{
   const row=this.row(account,id),state=String(row.state);if(Number(row.attempts)>=3||!['pending','retry_wait','paused','needs_review'].includes(state))throw Error('QUEUE_STATE_INVALID');
   if(type==='pause'){if(!['pending','retry_wait'].includes(state))throw Error('QUEUE_STATE_INVALID');this.update(id,'paused');}
   else if(type==='cancel')this.update(id,'cancelled');
-  else if(type==='resume'){if(state!=='paused'||Date.parse(String(row.next_attempt_at??row.due_at))<=now+30000)throw Error('QUEUE_REVIEW_REQUIRED');this.update(id,row.next_attempt_at?'retry_wait':'pending');}
+  else if(type==='resume'){if(state!=='paused'||Date.parse(String(row.next_attempt_at??row.due_at))<=now+(Number(row.attempts)>0?0:30000))throw Error('QUEUE_REVIEW_REQUIRED');this.update(id,row.next_attempt_at?'retry_wait':'pending');}
   else{if(Number(row.attempts)>0)throw Error('QUEUE_STATE_INVALID');if(!dueAt||!zone)throw Error('INPUT_INVALID');scheduleTime(dueAt,zone,now);this.db.prepare('UPDATE scheduled_jobs SET due_at=?,zone=? WHERE id=?').run(dueAt,zone,id);this.update(id,'pending');}
   return this.view(this.row(account,id));
  });}
