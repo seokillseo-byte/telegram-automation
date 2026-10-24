@@ -4,7 +4,7 @@
 1. Mở repository → Actions → **Phase 0 Windows**.
 2. Chọn run đúng branch/commit. Chờ job xanh.
 3. Trong Artifacts tải **Telegram-Automation-Phase0-Windows-x64**, giải nén ZIP.
-4. Cài file **Telegram-Automation-Phase0-0.0.1-x64-Setup.exe**. Không cần Node/Python/Docker.
+4. Cài file **Telegram-Automation-Phase0-0.0.3-x64-Setup.exe**. Không cần Node/Python/Docker.
 Nếu chưa có artifact hoặc workflow đỏ: gửi link run, chưa coi là build thành công. Artifact có thời hạn 14 ngày và có thể cần đăng nhập GitHub.
 
 ## A. Mở ứng dụng và mã hóa
@@ -66,3 +66,8 @@ Bản Linux không được cho phép lưu phiên trong spike Windows này. Khô
 Bản này bổ sung thông báo lỗi API/số điện thoại/mạng/thành phần đóng gói và hiển thị bước đang xử lý. Windows CI kiểm tra thêm khởi tạo Telegram worker trong ứng dụng đã đóng gói, không dùng credential thật.
 Nếu chưa đăng nhập được, ghi lại **phiên bản + bước + mã lỗi** đang hiện. Không gửi API Hash/OTP/token. API Hash được xóa khỏi ô nhập sau khi bấm đăng nhập là hành vi dự kiến; không chứng minh bạn chưa nhập.
 Chưa thể xác định nguyên nhân của ảnh lỗi TELEGRAM_ERROR từ bản 0.0.1 chỉ dựa trên ảnh. Không coi việc thêm chẩn đoán là bằng chứng đăng nhập thật đã được sửa thành công.
+
+## Bản 0.0.3 — Sửa tiếp tục đăng nhập sau chuyển DC
+Đã tái hiện bằng invoke thật của GramJS với sender giả: requestRetries=1 làm SendCode dừng sau PHONE_MIGRATE dù đã chuyển DC. Đổi về ngân sách 5 lần của SDK; giữ floodSleepThreshold=0, không tự thử lại FloodWait. Test xác nhận yêu cầu tiếp tục sau chuyển DC và chỉ thử đúng một lần khi Telegram yêu cầu chờ.
+Sửa đọc mã lỗi thực từ message của GramJS khi errorMessage đã bị đổi thành BAD_REQUEST/FLOOD. Chỉ hiển thị mã/thông báo đã biết, không xuất lỗi raw chứa bí mật.
+Test lại: đóng app cũ → cài 0.0.3 → nhập thông tin API → bắt đầu đăng nhập một lần → chờ ô mã Telegram → nhập mã/2FA → kiểm tra danh tính → restart/khôi phục. Không lặp liên tục nếu Telegram yêu cầu chờ. Live login chưa được xác nhận chỉ bằng test giả lập.

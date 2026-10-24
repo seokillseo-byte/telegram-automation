@@ -3,8 +3,10 @@ import {StringSession} from 'telegram/sessions';
 import {Logger,LogLevel} from 'telegram/extensions/Logger';
 import type {Identity} from '../../shared/src/protocol';
 export function makeClient(apiId:number,apiHash:string,session=''){
+ // GramJS consumes one request attempt when migrating to the account DC.
+ // Keep its normal bounded retry budget; FloodWait still exits immediately.
  const logger=new Logger(LogLevel.NONE);logger.log=()=>{};
- return new TelegramClient(new StringSession(session),apiId,apiHash,{connectionRetries:2,requestRetries:1,floodSleepThreshold:0,baseLogger:logger,autoReconnect:false});
+ return new TelegramClient(new StringSession(session),apiId,apiHash,{connectionRetries:2,requestRetries:5,floodSleepThreshold:0,baseLogger:logger,autoReconnect:false});
 }
 export function identity(entity:Api.User|Api.Chat|Api.Channel):Identity{
  if(entity instanceof Api.User)return {id:entity.id.toString(),name:[entity.firstName,entity.lastName].filter(Boolean).join(' '),username:entity.username,kind:entity.bot?'bot':'user'};
