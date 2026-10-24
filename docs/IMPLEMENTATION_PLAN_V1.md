@@ -249,3 +249,6 @@ Consent marketing và suppression theo tài khoản + peer namespace; nguồn/l�
 
 ### P6.1 · 0.14.0
 Bot long polling trong app, kiểm tra token + webhook, xem/sửa lời chào và bật/dừng rõ ràng. /start riêng tư hiển thị ba lựa chọn; callback chỉ giải thích, không tạo subscriber/consent. Token bot có lựa chọn lưu DPAPI riêng phiên tài khoản, khôi phục không tự bật. Claim/offset bền vững và phản hồi muộn được chặn để không replay mù; chưa coi P6.5 hoàn tất. [Nghiệm thu và giới hạn](BOT_START_V0.14.md). DB schema 8, chưa nghiệm thu live bot. Tiếp theo P6.2 opt-in chủ đề, /stop và consent event riêng cho bot.
+
+### P6.2 · 0.15.0
+Đúng phạm vi: xác nhận riêng hai chủ đề đã có, /stop hủy mọi chủ đề và lưu consent event bot. Yêu cầu xác nhận dùng nonce một lần, TTL 5 phút, gắn bot/người dùng/chủ đề/tin đã gửi; /stop vô hiệu hóa nút cũ và ưu tiên local trước outbound. Có lịch sử chỉ đọc tại mục Bot, không thêm CRM/chiến dịch/thông báo P6.4. DB schema 9. [Tiêu chí và test](BOT_CONSENT_V0.15.md). Chưa nghiệm thu live P6.2; tiếp theo theo kế hoạch là P6.3, không triển khai trong bản này.
