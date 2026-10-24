@@ -59,3 +59,6 @@ Kiểm tra quyền theo người nhận và loại nội dung, giữ trạng th�
 ## Lịch văn bản một lần — 0.10.0
 
 Bước đầu Phase 5: xác nhận lịch từ preview, lưu SQLite với payload mã hóa Windows, pause/resume/cancel và review lịch lỡ giờ. App cần mở và kết nối đúng tài khoản. Chưa có tự retry/lịch media/reply/marketing. Xem [hướng dẫn nghiệm thu](docs/ONE_TIME_QUEUE_V0.10.md).
+
+## P5.3 · Thử lại có phân loại · 0.11.0
+[Hướng dẫn và test](docs/QUEUE_RETRY_V0.11.md): tối đa 3 lần thử cho lịch văn bản cá nhân, chờ theo Telegram, lưu thời điểm thử lại, tạm dừng/hủy. Không tự thử lại khi chưa rõ kết quả gửi. Build nhánh `queue-retry-v0.11`; schema 6 không hạ về phiên bản cũ.

@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {createRequire} from 'node:module';
 import {QueueStore} from '../apps/desktop/src/main/queue-store';
 import {ResearchStore} from '../apps/desktop/src/main/research-store';
-import {scheduleTime,localScheduleToUtc,parseQueueAction,parseScheduledPayload,type ScheduledPayload} from '../packages/shared/src/queue';
+import {queueRetry,scheduleTime,localScheduleToUtc,parseQueueAction,parseScheduledPayload,type ScheduledPayload} from '../packages/shared/src/queue';
 import {ManualSender} from '../packages/telegram-user/src/manual-send';
 import {InboxReader} from '../packages/telegram-user/src/inbox';
 const sdk=createRequire(resolve('apps/desktop/package.json'));const {Api}=sdk('telegram');
@@ -55,4 +55,39 @@ test('scheduling consumes preview without sending, persists fixed peer/random ID
 test('scheduled lost acknowledgment is uncertain and malformed/marketing payload never dispatches',async()=>{
  const payload:ScheduledPayload={accountId:'1',recipient:user,peer:{type:'user',id:'9',accessHash:'55'},text:'Hello',randomId:'12345',purpose:'personal'};const {client,stats}=transport();let attempts=0;client.invoke=async()=>{attempts++;throw Error('TIMEOUT');};const result=await new ManualSender().scheduled(client as never,payload,'1');assert.ok(!result.ok&&result.uncertain);
  assert.throws(()=>parseScheduledPayload({...payload,purpose:'marketing'}));const bad=await new ManualSender().scheduled(client as never,{...payload,peer:{type:'user',id:'88',accessHash:'55'}},'1');assert.ok(!bad.ok&&!bad.uncertain);assert.equal(attempts,1);assert.equal(stats().sends,0);
+});
+
+test('classified retries persist waits, block account, reuse payload and stop after three attempts',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'queue-retry-')),file=join(dir,'jobs.sqlite');let q=new QueueStore(file);const now=Date.now(),due=now+60000;
+ try{
+  const job=q.create('1',uid(41),user,new Date(due).toISOString(),'UTC',Buffer.from('fixed encrypted payload'));
+  const other=q.create('1',uid(42),user,new Date(due+40000).toISOString(),'UTC',Buffer.from('other'));
+  assert.equal(q.claim('1',due)?.id,job.id);q.reject('1',job.id,{code:'RATE_LIMIT',retryAfter:60},false,due);
+  assert.equal(q.detail('1',job.id).job.state,'retry_wait');assert.equal(q.claim('1',due+40000),undefined);
+  q.close();q=new QueueStore(file);q.recover(due+10000);assert.equal(q.claim('1',due+60000),undefined);
+  const retry=q.claim('1',due+61000);assert.equal(retry?.id,job.id);assert.equal(retry?.attempts,2);assert.equal(q.detail('1',job.id).payload.toString(),'fixed encrypted payload');
+  q.reject('1',job.id,{code:'TIMEOUT'},false,due+61000);q.change('1',job.id,'pause');q.change('1',job.id,'resume',undefined,undefined,due+180000);assert.equal(q.detail('1',job.id).job.nextAttemptAt,new Date(due+181000).toISOString());q.change('1',job.id,'pause');assert.equal(q.claim('1',due+181000),undefined);q.change('1',job.id,'cancel');assert.equal(q.detail('1',job.id).job.state,'cancelled');q.overdue(due+181000);assert.equal(q.detail('1',other.id).job.state,'needs_review');
+  const final=q.create('2',uid(43),user,new Date(due).toISOString(),'UTC',Buffer.from('fixed'));
+  for(let attempt=1,at=due;attempt<=3;attempt++){assert.equal(q.claim('2',at)?.attempts,attempt);q.reject('2',final.id,{code:'RATE_LIMIT',retryAfter:1},false,at);at+=2000;}
+  assert.equal(q.detail('2',final.id).job.state,'failed');assert.equal(q.claim('2',due+10000),undefined);
+ }finally{q.close();await rm(dir,{recursive:true,force:true});}
+});
+
+test('uncertain and permanent failures never retry; interrupted retry is review only',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'queue-no-retry-')),q=new QueueStore(join(dir,'q.sqlite')),now=Date.now()+60000;
+ try{for(const [index,code,uncertain] of [[1,'TIMEOUT',true],[2,'PEER_FLOOD',false],[3,'CHAT_WRITE_FORBIDDEN',false],[4,'USER_PRIVACY_RESTRICTED',false],[5,'RATE_LIMIT',false]] as const){const j=q.create('1',uid(index),user,new Date(now).toISOString(),'UTC',Buffer.from('x'));assert.equal(q.claim('1',now)?.id,j.id);q.reject('1',j.id,{code},uncertain,now);assert.equal(q.detail('1',j.id).job.state,uncertain?'uncertain':'failed');}
+ const j=q.create('2',uid(8),user,new Date(now).toISOString(),'UTC',Buffer.from('x'));q.claim('2',now);q.reject('2',j.id,{code:'TIMEOUT'},false,now);q.recover(now+31000);assert.equal(q.detail('2',j.id).job.state,'needs_review');assert.equal(q.claim('2',now+31001),undefined);assert.throws(()=>q.change('2',j.id,'reschedule',new Date(now+90000).toISOString(),'UTC',now));q.change('2',j.id,'cancel');
+ }finally{q.close();await rm(dir,{recursive:true,force:true});}
+});
+
+test('scheduled adapter disables SDK request retries, restores setting, and distinguishes pre-send network errors',async()=>{
+ const payload:ScheduledPayload={accountId:'1',recipient:user,peer:{type:'user',id:'9',accessHash:'55'},text:'Hello',randomId:'12345',purpose:'personal'};
+ const fixture=transport(),client={...fixture.client,_requestRetries:5};let sends=0;client.invoke=async()=>{assert.equal(client._requestRetries,1);sends++;throw Error('ECONNRESET');};
+ const sent=await new ManualSender().scheduled(client as never,payload,'1');assert.ok(!sent.ok&&sent.uncertain);assert.equal(sends,1);assert.equal(client._requestRetries,5);
+ client.getEntity=async()=>{throw Error('ECONNRESET');};const before=await new ManualSender().scheduled(client as never,payload,'1');assert.ok(!before.ok&&!before.uncertain&&before.error.code==='ECONNRESET');assert.equal(sends,1);
+});
+
+test('retry policy rejects invalid waits, long waits, exhausted attempts and uncertain outcomes',()=>{
+ for(const retryAfter of [undefined,0,-1,NaN,Infinity,86401])assert.equal(queueRetry({code:'RATE_LIMIT',retryAfter},false,1,0),undefined);
+ assert.equal(queueRetry({code:'RATE_LIMIT',retryAfter:1},false,1,0),'1970-01-01T00:00:02.000Z');assert.equal(queueRetry({code:'RATE_LIMIT',retryAfter:1},true,1,0),undefined);assert.equal(queueRetry({code:'TIMEOUT'},false,3,0),undefined);assert.equal(queueRetry({code:'TELEGRAM_ERROR'},false,1,0),undefined);
 });

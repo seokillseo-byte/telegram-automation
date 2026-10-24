@@ -1,8 +1,8 @@
 import type {Identity} from './protocol';
-export type JobState='pending'|'paused'|'running'|'sent'|'failed'|'uncertain'|'needs_review'|'cancelled';
+export type JobState='pending'|'retry_wait'|'paused'|'running'|'sent'|'failed'|'uncertain'|'needs_review'|'cancelled';
 export type ScheduledPeer={type:'self'}|{type:'user'|'channel';id:string;accessHash:string}|{type:'chat';id:string};
 export type ScheduledPayload={accountId:string;recipient:Identity;peer:ScheduledPeer;text:string;randomId:string;purpose:'personal'};
-export type QueueJob={id:string;accountId:string;recipient:Identity;dueAt:string;zone:string;createdAt:string;state:JobState;attempts:number;remoteId?:number;errorCode?:string};
+export type QueueJob={id:string;accountId:string;recipient:Identity;dueAt:string;zone:string;createdAt:string;state:JobState;attempts:number;nextAttemptAt?:string;remoteId?:number;errorCode?:string};
 export type QueueEvent={at:string;state:JobState;code?:string};
 export type QueueAction={type:'list'}|{type:'detail';id:string}|{type:'pause'|'resume'|'cancel';id:string}|{type:'reschedule';id:string;dueAt:string;zone:string};
 export type QueueReply={ok:true;jobs?:QueueJob[];detail?:{job:QueueJob;text:string;events:QueueEvent[]}}|{ok:false;error:string};
@@ -33,4 +33,13 @@ export function parseScheduledPayload(value:unknown):ScheduledPayload{
 }
 
 export function utcToScheduleLocal(at:number,zone:string):string{const p=zoneParts(at,zone),pad=(n:number)=>String(n).padStart(2,'0');return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;}
-export const JOB_LABELS:Record<JobState,string>={pending:'Chờ đến giờ',paused:'Tạm dừng',running:'Đang thực thi',sent:'Telegram đã xác nhận',failed:'Thất bại',uncertain:'Chưa rõ kết quả',needs_review:'Cần kiểm tra giờ mới',cancelled:'Đã hủy'};
+export const JOB_LABELS:Record<JobState,string>={pending:'Chờ đến giờ',retry_wait:'Chờ thử lại',paused:'Tạm dừng',running:'Đang thực thi',sent:'Telegram đã xác nhận',failed:'Thất bại',uncertain:'Chưa rõ kết quả',needs_review:'Cần kiểm tra giờ mới',cancelled:'Đã hủy'};
+
+export const QUEUE_MAX_ATTEMPTS=3;
+// Only explicit rejection or failure before SendMessage may be retried.
+export function queueRetry(error:{code:string;retryAfter?:number},uncertain:boolean,attempts:number,now=Date.now()):string|undefined{
+ if(uncertain||attempts>=QUEUE_MAX_ATTEMPTS)return;
+ const wait=error.retryAfter;
+ if(error.code==='RATE_LIMIT'&&typeof wait==='number'&&Number.isFinite(wait)&&wait>0&&wait<=86400)return new Date(now+Math.ceil(wait)*1000+1000).toISOString();
+ if(['TIMEOUT','NETWORK_TIMEOUT','ETIMEDOUT','ESOCKETTIMEDOUT','ECONNRESET','ECONNREFUSED','ENETUNREACH','EHOSTUNREACH','EAI_AGAIN','ENOTFOUND','CONNECTION_FAILED'].includes(error.code))return new Date(now+(attempts===1?30000:120000)).toISOString();
+}

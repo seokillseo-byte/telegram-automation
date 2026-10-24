@@ -237,3 +237,6 @@ Bảng capability theo người nhận/loại nội dung, kiểm tra lại trư�
 
 ## Phase 5 bước đầu — 0.10.0
 Người dùng xác nhận gửi thủ công thành công đến tài khoản thật. Triển khai P5.1 lịch văn bản một lần và nền P5.2 (SQLite claim/dedupe/request ID), điều khiển/recovery tối thiểu. Chưa hoàn thành retry P5.3 hoặc consent/suppression P5.5, chưa có lịch marketing/tệp/reply. Xem ONE_TIME_QUEUE_V0.10.md; cần nghiệm thu lịch live trước khi coi phần này hoàn tất.
+
+### P5.3 · 0.11.0
+Thử lại có phân loại cho lịch văn bản cá nhân: tối đa 3 lần, FloodWait theo server và cooldown lưu theo tài khoản; lỗi mạng chỉ tự thử lại trước dispatch. Sau dispatch mất ACK/mạng luôn cần kiểm tra, không tự thử lại. Có pause/resume/cancel cho retry đang chờ; lưu next_attempt_at và lịch sử trạng thái. SDK SendMessage của lịch chỉ một request attempt. [Tiêu chí và test](QUEUE_RETRY_V0.11.md). P5.4 phục hồi tiếp tục nghiệm thu; P5.5 chưa triển khai.
