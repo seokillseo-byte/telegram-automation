@@ -27,7 +27,7 @@ test('preview does not send; confirm pins immutable peer/content and consumes to
 
 test('permissions are checked again at confirm and username changes cannot redirect an existing preview',async()=>{
  const sender=new ManualSender(),{fake,calls,setEntity}=fixture();const id=previewId(await sender.preview(fake as never,new InboxReader(),input));setEntity(new Api.User({id:BigInt(999),firstName:'Changed',accessHash:BigInt(4)}));const reply=await sender.confirm(fake as never,id);assert.ok(!reply.ok&&reply.error.code==='SEND_PREVIEW_EXPIRED');assert.ok(!calls.includes('sendMessage'));
- const channel=new Api.Channel({id:BigInt(123),title:'Read only',broadcast:true,accessHash:BigInt(4)});const denied={...fake,getEntity:async()=>channel};await assert.rejects(sender.preview(denied as never,new InboxReader(),input),/CHAT_WRITE_FORBIDDEN/);assert.ok(!calls.includes('sendMessage'));
+ const channel=new Api.Channel({id:BigInt(123),title:'Read only',broadcast:true,accessHash:BigInt(4)});const denied={...fake,getEntity:async()=>channel};const blocked=await sender.preview(denied as never,new InboxReader(),input);assert.ok(!blocked.ok&&blocked.error.code==='CHAT_WRITE_FORBIDDEN'&&blocked.capabilities?.text.state==='blocked');assert.ok(!calls.includes('sendMessage'));
 });
 
 test('photo and document dispatch one immutable buffer with explicit media mode',async()=>{

@@ -41,8 +41,8 @@ port.on('message',async (message)=>{
    unsubscribeInbox=subscribeInboxUpdates(client,inbox,update=>port.postMessage({kind:'inbox_update',update}));
    port.postMessage({kind:'session',value:{apiId:message.apiId,apiHash:message.apiHash,session:client.session.save()},identity:identity(me as Api.User)});
   } else if(message.type==='manual'){
-   try{if(!client)throw Error('NOT_CONNECTED');const reply=message.action.type==='preview'?await sender.preview(client,inbox,message.action,message.attachment):await sender.confirm(client,message.action.id);port.postMessage({kind:'manual',reply});}
-   catch(error){port.postMessage({kind:'manual',reply:{ok:false,error:classifyError(error)}});}
+   try{if(!client)throw Error('NOT_CONNECTED');const reply=message.action.type==='capabilities'?await sender.capabilities(client,inbox,message.action):message.action.type==='preview'?await sender.preview(client,inbox,message.action,message.attachment):await sender.confirm(client,message.action.id);port.postMessage({kind:'manual',reply});}
+   catch(error){port.postMessage({kind:'manual',reply:{ok:false,error:sender.noteFailure(error)}});}
   } else if(message.type==='inbox'){
    try{if(!client||!await client.checkAuthorization())throw Error('NOT_CONNECTED');
     port.postMessage({kind:'inbox',reply:await inbox.read(client,message.action)});
