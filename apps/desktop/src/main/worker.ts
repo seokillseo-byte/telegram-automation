@@ -34,7 +34,7 @@ port.on('message',async (message)=>{
    port.postMessage({kind:'session',value:{apiId:message.apiId,apiHash:message.apiHash,session:client.session.save()},identity:identity(me as Api.User)});
   } else if(message.type==='search'){
    if(!client||!await client.checkAuthorization())throw Error('NOT_CONNECTED');
-   emit({state:'searching'});const results=await search(client,message.query,message.exact);emit({state:'search_complete',queryResults:results});
+   stage=message.exact?'resolving_username':'searching_public';emit({state:'searching',stage});const results=await search(client,message.query,message.exact);emit({state:'search_complete',stage:'search_complete',queryResults:results,searchContext:{query:message.query,exact:message.exact}});
   } else if(message.type==='logout'){
    if(client){await client.invoke(new Api.auth.LogOut());await client.destroy();client=undefined;}
    port.postMessage({kind:'logged_out'});

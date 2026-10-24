@@ -1,1 +1,31 @@
-{"appId":"vn.telegramautomation.desktop","productName":"Telegram Automation Phase 0","directories":{"app":"apps/desktop","output":"release"},"files":["dist/**/*","package.json"],"asar":true,"npmRebuild":false,"win":{"target":[{"target":"nsis","arch":["x64"]}],"artifactName":"Telegram-Automation-Phase0-${version}-${arch}-Setup.${ext}"},"nsis":{"oneClick":false,"perMachine":false,"allowToChangeInstallationDirectory":true,"deleteAppDataOnUninstall":false}}
+{
+  "appId": "vn.telegramautomation.desktop",
+  "productName": "Telegram Automation Phase 0",
+  "directories": {
+    "app": "apps/desktop",
+    "output": "release"
+  },
+  "files": [
+    "dist/**/*",
+    "package.json"
+  ],
+  "asar": true,
+  "npmRebuild": false,
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "artifactName": "Telegram-Industry-Research-${version}-${arch}-Setup.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false
+  }
+}
