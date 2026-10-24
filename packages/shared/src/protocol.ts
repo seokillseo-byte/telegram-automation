@@ -2,7 +2,7 @@ import {normalizeGroupTarget} from './group-analysis';
 export type Identity = {id:string; name:string; username?:string; kind:'user'|'bot'|'group'|'channel';peerType?:'user'|'chat'|'channel'};
 export type SearchPeer=Identity&{sources:('personalized'|'discovery'|'exact')[]};
 export type Failure = {code:string; message:string; retryAfter?:number};
-export type Status = {state:string; identity?:Identity; error?:Failure; groupReport?:import('./group-analysis').GroupReport; queryResults?:SearchPeer[]; researchResults?:import('./research').ResearchPeer[]; searchContext?:{query:string;exact:boolean}; userIdentity?:Identity; userConnected?:boolean; encryption?:boolean; stage?:string};
+export type Status = {state:string; identity?:Identity; error?:Failure; groupReport?:import('./group-analysis').GroupReport; queryResults?:SearchPeer[]; researchResults?:import('./research').ResearchPeer[]; searchContext?:{query:string;exact:boolean}; userIdentity?:Identity; userConnected?:boolean; inboxOnline?:boolean; encryption?:boolean; stage?:string};
 export type Action =
  | {type:'login';apiId:number;apiHash:string;phone:string}
  | {type:'answer';value:string}

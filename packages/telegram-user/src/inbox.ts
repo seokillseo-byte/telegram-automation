@@ -2,7 +2,7 @@ import {returnBigInt} from 'telegram/Helpers';
 import {randomUUID} from 'node:crypto';
 import {Api,type TelegramClient} from 'telegram';
 import {identity} from './index';
-import {INBOX_PAGE_SIZE,INBOX_CACHE_LIMIT,parseInboxAction,type InboxAction,type InboxReply,type InboxMessage,type InboxDialog} from '../../shared/src/inbox';
+import {INBOX_PAGE_SIZE,INBOX_CACHE_LIMIT,parseInboxAction,type InboxAction,type InboxReply,type InboxMessage,type InboxDialog,type InboxUpdate} from '../../shared/src/inbox';
 function key(peer:Api.TypePeer):string{return peer instanceof Api.PeerUser?'user:'+peer.userId:peer instanceof Api.PeerChannel?'channel:'+peer.channelId:'chat:'+peer.chatId;}
 function timestamp(seconds:number|undefined):string|undefined{return seconds&&Number.isFinite(seconds)?new Date(seconds*1000).toISOString():undefined;}
 function mediaLabel(media:Api.TypeMessageMedia|undefined):string|undefined{
@@ -19,8 +19,34 @@ function messageView(message:Api.Message|Api.MessageService):InboxMessage{
 // Peer access hashes and pagination cursors remain inside the connected worker.
 export class InboxReader{
  private peers=new Map<string,Api.TypeInputPeer>();
+ private points=new Map<string,number>();
  private cursors=new Map<string,{offsetDate:number;offsetId:number;offsetPeer:Api.TypeInputPeer}>();
- reset(){this.peers.clear();this.cursors.clear();}
+ reset(){this.peers.clear();this.cursors.clear();this.points.clear();}
+ update(raw:unknown):InboxUpdate|undefined{
+  if(raw instanceof Api.UpdatesTooLong)return {type:'resync'};
+  if(raw instanceof Api.UpdateChannelTooLong)return this.peers.has('channel:'+raw.channelId)?{type:'resync'}:{type:'changed'};
+  if(raw&&typeof raw==='object'&&'pts' in raw&&'ptsCount' in raw&&typeof raw.pts==='number'&&typeof raw.ptsCount==='number'){
+   let scope='global';
+   if('channelId' in raw)scope='channel:'+String(raw.channelId);
+   else if((raw instanceof Api.UpdateNewChannelMessage||raw instanceof Api.UpdateEditChannelMessage)&&(raw.message instanceof Api.Message||raw.message instanceof Api.MessageService))scope=key(raw.message.peerId);
+   if(scope==='global'||this.peers.has(scope)){const before=this.points.get(scope);this.points.set(scope,Math.max(before??0,raw.pts));if(before!==undefined&&raw.pts>before+raw.ptsCount)return {type:'resync'};}
+  }
+  if(raw instanceof Api.UpdateNewMessage||raw instanceof Api.UpdateNewChannelMessage||raw instanceof Api.UpdateEditMessage||raw instanceof Api.UpdateEditChannelMessage){
+   const message=raw.message;if(!(message instanceof Api.Message||message instanceof Api.MessageService))return;
+   const ref=key(message.peerId);if(!this.peers.has(ref))return {type:'changed'};
+   return {type:'message',key:ref,message:messageView(message),edited:raw instanceof Api.UpdateEditMessage||raw instanceof Api.UpdateEditChannelMessage};
+  }
+  if(raw instanceof Api.UpdateShortMessage||raw instanceof Api.UpdateShortChatMessage){
+   const ref=raw instanceof Api.UpdateShortMessage?'user:'+raw.userId:'chat:'+raw.chatId;
+   if(!this.peers.has(ref))return {type:'changed'};
+   return {type:'message',key:ref,edited:false,message:{id:raw.id,at:timestamp(raw.date),text:raw.message,outgoing:Boolean(raw.out),kind:'text'}};
+  }
+  if(raw instanceof Api.UpdateDeleteChannelMessages){if(raw.messages.length>INBOX_CACHE_LIMIT)return {type:'resync'};const ref='channel:'+raw.channelId;return this.peers.has(ref)?{type:'delete',key:ref,ids:raw.messages.slice(0,INBOX_CACHE_LIMIT)}:undefined;}
+  if(raw instanceof Api.UpdateDeleteMessages&&raw.messages.length>INBOX_CACHE_LIMIT)return {type:'resync'};
+  if(raw instanceof Api.UpdateDeleteMessages)return {type:'delete',ids:raw.messages.slice(0,INBOX_CACHE_LIMIT)};
+  if(raw instanceof Api.UpdateReadHistoryInbox)return {type:'changed',key:key(raw.peer)};
+  if(raw instanceof Api.UpdateReadChannelInbox)return {type:'changed',key:'channel:'+raw.channelId};
+ }
  async read(client:Pick<TelegramClient,'invoke'>,input:InboxAction):Promise<InboxReply>{
   const action=parseInboxAction(input);
   if(action.type==='messages'){
@@ -55,7 +81,7 @@ export class InboxReader{
    const ref=key(dialog.peer),entity=entities.get(ref);if(!entity)continue;
    if(!this.peers.has(ref)&&this.peers.size>=INBOX_CACHE_LIMIT)break;
    this.peers.set(ref,entity.input);const message=messages.get(ref+':'+dialog.topMessage),view=message?messageView(message):undefined;
-   dialogs.push({...entity.view,key:ref,unread:dialog.unreadCount,lastAt:view?.at,preview:view?.text||view?.media||''});
+   dialogs.push({...entity.view,key:ref,unread:dialog.unreadCount,lastAt:view?.at,lastMessageId:dialog.topMessage,preview:view?.text||view?.media||''});
   }
   let next:string|undefined;
   if(result instanceof Api.messages.DialogsSlice&&result.dialogs.length>=INBOX_PAGE_SIZE&&this.peers.size<INBOX_CACHE_LIMIT){

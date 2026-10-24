@@ -1,7 +1,7 @@
 name: Windows Desktop
 on:
   push:
-    branches: [main, phase-0-foundation-spike, industry-research-v0.1, group-channel-analysis-v0.2, phase-1-app-foundation, message-templates-v0.4, inbox-read-v0.5]
+    branches: [main, phase-0-foundation-spike, industry-research-v0.1, group-channel-analysis-v0.2, phase-1-app-foundation, message-templates-v0.4, inbox-read-v0.5, inbox-live-v0.6]
   pull_request:
   workflow_dispatch:
 permissions:
