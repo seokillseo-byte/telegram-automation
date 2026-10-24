@@ -57,7 +57,7 @@ test('stop during an outbound request stays uncertain; reopening skips the old u
 
 test('rate limit stops without auto retry and honors the returned wait on explicit restart; errors redact token',async()=>{
  const f=await fixture(),p=provider([[start()]]);let now=Date.now();p.onSend(async()=>new Response(JSON.stringify({ok:false,error_code:429,parameters:{retry_after:60}}),{status:429}));const runtime=new BotIntroRuntime(f.store,p.request,()=>now);
- try{await runtime.verify(token);await runtime.start();await until(()=>runtime.snapshot().state==='error');assert.equal(runtime.snapshot().error?.retryAfter,60);const count=p.calls.length;await assert.rejects(runtime.start(),/BOT_RATE_LIMIT/);assert.equal(p.calls.length,count);now+=61000;assert.equal(runtime.snapshot().retryAt,undefined);const bad=new IntroBotApi(token,async()=>{throw Error('Network '+token);});await assert.rejects(bad.verify(new AbortController().signal),error=>!String(error).includes(token)&&String(error).includes('BOT_NETWORK'));}
+ try{await runtime.verify(token);await runtime.start();await until(()=>runtime.snapshot().state==='error');assert.equal(runtime.snapshot().error?.retryAfter,60);const count=p.calls.length;await assert.rejects(runtime.start(),/BOT_RATE_LIMIT/);await assert.rejects(runtime.verify(token),/BOT_RATE_LIMIT/);assert.equal(p.calls.length,count);now+=61000;assert.equal(runtime.snapshot().retryAt,undefined);const bad=new IntroBotApi(token,async()=>{throw Error('Network '+token);});await assert.rejects(bad.verify(new AbortController().signal),error=>!String(error).includes(token)&&String(error).includes('BOT_NETWORK'));}
  finally{runtime.stop();await f.close();}
 });
 
