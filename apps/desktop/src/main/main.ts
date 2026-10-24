@@ -1,3 +1,6 @@
+import {BotIntroStore} from './bot-intro-store';
+import {BotIntroRuntime} from './bot-intro-runtime';
+import {botToken,parseBotIntroAction,type BotIntroReply} from '../../../../packages/shared/src/bot-intro';
 import {randomUUID} from 'node:crypto';
 import {createPolicyCheckedJob} from './scheduled-policy';
 import {parsePolicyAction,type PolicyReply,type SendPurpose} from '../../../../packages/shared/src/send-policy';
@@ -28,6 +31,12 @@ let win:BrowserWindow;
 let worker:Worker|undefined;
 let watchdog:NodeJS.Timeout|undefined;
 let vault:Vault;
+let botVault:Vault;
+let botStore:BotIntroStore;
+let botIntro:BotIntroRuntime;
+let savedBotToken=false;
+let botOperation=false;
+let botEpoch=0;
 let research:ResearchStore;
 let queue:QueueStore;
 let policy:SendPolicyStore;
@@ -105,7 +114,8 @@ if(!app.requestSingleInstanceLock())app.quit();
 else app.whenReady().then(async()=>{
  encryption=process.platform==='win32'&&await safeStorage.isAsyncEncryptionAvailable();
  vault=new Vault(app.getPath('userData'),{available:async()=>encryption,encrypt:value=>safeStorage.encryptStringAsync(value),decrypt:async value=>(await safeStorage.decryptStringAsync(value)).result});
- research=new ResearchStore(join(app.getPath('userData'),'industry-research.sqlite'));researchScope=research.lastAccount();research.addEvent('app_started');policy=new SendPolicyStore(join(app.getPath('userData'),'industry-research.sqlite'));queue=new QueueStore(join(app.getPath('userData'),'industry-research.sqlite'));queue.recover();
+ botVault=new Vault(app.getPath('userData'),{available:async()=>encryption,encrypt:value=>safeStorage.encryptStringAsync(value),decrypt:async value=>(await safeStorage.decryptStringAsync(value)).result},'bot-token.enc');savedBotToken=await botVault.exists();
+ research=new ResearchStore(join(app.getPath('userData'),'industry-research.sqlite'));researchScope=research.lastAccount();research.addEvent('app_started');policy=new SendPolicyStore(join(app.getPath('userData'),'industry-research.sqlite'));queue=new QueueStore(join(app.getPath('userData'),'industry-research.sqlite'));queue.recover();botStore=new BotIntroStore(join(app.getPath('userData'),'industry-research.sqlite'));botIntro=new BotIntroRuntime(botStore);
  queueRunner=new QueueRunner({authorize:payload=>policy.assertAllowed(payload.accountId,payload.recipient,payload.purpose),store:()=>queue,context:()=>({accountId:userIdentity?.id,connected:Boolean(worker&&userIdentity),online:inboxOnline,suspended,busy}),decrypt:decryptJob,send:(id,payload,expiresAt,runId)=>{emit({state:'queue_sending'});startWatch();worker!.postMessage({type:'scheduled',id,payload,expiresAt,runId});},lock:value=>{busy=value;if(!value)stopWatch();},terminate:code=>{void stopWorker(false,code).then(()=>emit({state:'error',error:classifyError(Error(code))}));},changed:()=>emit({state:'queue_ready'}),error:()=>emit({state:'error',error:classifyError(Error('QUEUE_STORE_ERROR'))})});
  win=new BrowserWindow({width:1100,height:850,minWidth:760,minHeight:600,webPreferences:{preload:join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
  win.removeMenu();
@@ -113,7 +123,21 @@ else app.whenReady().then(async()=>{
  win.webContents.on('will-navigate',(event,url)=>{if(url!==page)event.preventDefault();});
  win.webContents.session.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
  win.webContents.session.webRequest.onBeforeRequest((details,callback)=>callback({cancel:!details.url.startsWith(pathToFileURL(__dirname).href+'/')}));
- ipcMain.handle('policy:action',async(event,input):Promise<PolicyReply>=>{
+ ipcMain.handle('bot-intro:action',async(event,input):Promise<BotIntroReply>=>{
+  if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
+  let owns=false;
+  try{const action=parseBotIntroAction(input);if(action.type==='status')return {ok:true,snapshot:botIntro.snapshot(savedBotToken)};
+   if(action.type==='stop'){botEpoch++;botIntro.stop();return {ok:true,snapshot:botIntro.snapshot(savedBotToken)};}
+   if(botOperation)throw Error('BUSY');botOperation=true;owns=true;const epoch=botEpoch;
+   if(action.type==='verify'){if(action.remember&&!encryption)throw Error('ENCRYPTION_UNAVAILABLE');await botIntro.verify(action.token);if(epoch!==botEpoch)throw Error('CANCELLED');if(action.remember){await botVault.save({token:action.token});savedBotToken=true;}else{await botVault.clear();savedBotToken=false;}}
+   else if(action.type==='restore'){const stored=await botVault.load() as {token?:unknown};if(epoch!==botEpoch)throw Error('CANCELLED');await botIntro.verify(botToken(stored?.token));}
+   else if(action.type==='start')await botIntro.start();
+   else if(action.type==='forget'){botEpoch++;botIntro.stop(true);await botVault.clear();savedBotToken=false;}
+   else if(action.type==='saveConfig')botIntro.save(action.botId,action.config);
+   return {ok:true,snapshot:botIntro.snapshot(savedBotToken)};
+  }catch(error){return {ok:false,error:classifyError(error),snapshot:botIntro.snapshot(savedBotToken)};}finally{if(owns)botOperation=false;}
+ });
+ ipcMain.handle('policy:action' ,async(event,input):Promise<PolicyReply>=>{
   if(event.sender!==win.webContents||event.senderFrame?.url!==page)throw Error('IPC_REJECTED');
   try{const action=parsePolicyAction(input),accountId=researchScope;
    if(action.type==='list')return {ok:true,accountId,records:accountId?policy.list(accountId):[]};
@@ -266,13 +290,31 @@ else app.whenReady().then(async()=>{
   }catch(error){busy=false;emit({state:'error',error:classifyError(error)});}
  });
  await win.loadFile(join(__dirname,'index.html'));
- if(!process.argv.includes('--smoke-test')){queueTimer=setInterval(()=>{void queueRunner.tick();},1000);powerMonitor.on('suspend',()=>{suspended=true;queueRunner.boundary('QUEUE_SLEEP');});powerMonitor.on('resume',()=>{queueRunner.boundary('QUEUE_RESUMED');queueRunner.resetClock();suspended=false;});}
+ if(!process.argv.includes('--smoke-test')){queueTimer=setInterval(()=>{void queueRunner.tick();},1000);powerMonitor.on('suspend',()=>{suspended=true;botIntro.stop();queueRunner.boundary('QUEUE_SLEEP');});powerMonitor.on('resume',()=>{queueRunner.boundary('QUEUE_RESUMED');queueRunner.resetClock();suspended=false;});}
  if(process.argv.includes('--smoke-test')){
   try{
    const ok=await win.webContents.executeJavaScript(`new Promise(resolve=>{let attempts=0;const timer=setInterval(()=>{const ready=document.querySelector('h1')?.textContent.includes('Telegram Automation') && typeof window.spike?.action === 'function' && typeof window.spike?.analysis === 'function' && typeof window.spike?.app === 'function' && document.querySelector('nav')?.textContent.includes('Phân tích nhóm/kênh') && typeof require === 'undefined';if(ready||++attempts>=50){clearInterval(timer);resolve(Boolean(ready));}},100);})`);
    if(!ok)throw Error('SMOKE_FAILED');
    const navigationOk=await win.webContents.executeJavaScript(`(async()=>{const buttons=[...document.querySelectorAll('nav button')];if(buttons.length!==11)return false;for(const button of buttons){button.click();await new Promise(resolve=>setTimeout(resolve,100));if(document.querySelector('.workspace')?.dataset.page!==button.dataset.page)return false;}return true;})()`);
    if(!navigationOk)throw Error('SMOKE_FAILED');console.log('PHASE1_NAVIGATION_PASS');
+   if(process.platform==='win32'){
+    const directory=await mkdtemp(join(tmpdir(),'telegram-bot-intro-smoke-')),previousIntro=botIntro,previousBotStore=botStore,previousBotVault=botVault,previousSaved=savedBotToken;
+    const crypto={available:async()=>encryption,encrypt:(value:string)=>safeStorage.encryptStringAsync(value),decrypt:async(value:Buffer)=>(await safeStorage.decryptStringAsync(value)).result};
+    let botReplies=0,polls=0;const methods:string[]=[];const now=Math.floor(Date.now()/1000),introUpdates=[{update_id:1,message:{message_id:1,date:now,text:'/start',chat:{id:42,type:'private'},from:{id:42,is_bot:false},entities:[{type:'bot_command',offset:0,length:6}]}},{update_id:1,message:{message_id:1,date:now,text:'/start',chat:{id:42,type:'private'},from:{id:42,is_bot:false},entities:[{type:'bot_command',offset:0,length:6}]}},{update_id:2,callback_query:{id:'fixture-choice',data:'intro:product:v1',from:{id:42,is_bot:false},message:{message_id:77,date:now,chat:{id:42,type:'private'},from:{id:123456,is_bot:true}}}}];
+    const reply=(result:unknown)=>new Response(JSON.stringify({ok:true,result}),{status:200});
+    const fixtureBotFetch:typeof fetch=async(url,init)=>{const method=String(url).split('/').at(-1)!;methods.push(method);if(method==='getMe')return reply({id:123456,is_bot:true,first_name:'Fixture bot',username:'fixture_bot'});if(method==='getWebhookInfo')return reply({url:''});if(method==='getUpdates'){polls++;if(polls===1)return reply(introUpdates);return new Promise((_resolve,reject)=>init?.signal?.addEventListener('abort',()=>reject(Error('cancelled')),{once:true}));}if(method==='sendMessage'){botReplies++;const body=JSON.parse(String(init?.body));if(body.chat_id!==42||!body.text.includes('chưa đăng ký')||body.reply_markup.inline_keyboard.length!==3)throw Error('SMOKE_FAILED');return reply({message_id:77});}if(method==='answerCallbackQuery'){botReplies++;return reply(true);}throw Error('SMOKE_FAILED');};
+    botStore=new BotIntroStore(join(directory,'bot.sqlite'));botIntro=new BotIntroRuntime(botStore,fixtureBotFetch);botVault=new Vault(directory,crypto,'bot-token.enc');savedBotToken=false;
+    const userProbe=new Vault(directory,crypto);await userProbe.save({session:'user-session-kept'});
+    try{
+     const verified=await win.webContents.executeJavaScript(`(async()=>{const wait=()=>new Promise(resolve=>setTimeout(resolve,100));document.querySelector('nav button[data-page="account"]').click();await wait();const token=document.querySelector('[data-testid="bot-intro-token"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(token,'123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');token.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-testid="bot-intro-remember"]').click();await wait();document.querySelector('[data-testid="bot-intro-verify"]').click();for(let i=0;i<30;i++){await wait();if(document.querySelector('[data-testid="bot-intro-state"]')?.textContent.includes('Đã kiểm tra'))return document.querySelector('[data-testid="bot-intro-token"]').value==='';}return false;})()`);
+     if(!verified||botReplies||polls||!savedBotToken)throw Error('SMOKE_FAILED');const ciphertext=await readFile(join(directory,'bot-token.enc'));if(ciphertext.includes(Buffer.from('123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')))throw Error('PLAINTEXT_FOUND');
+     const running=await win.webContents.executeJavaScript(`(async()=>{const wait=()=>new Promise(resolve=>setTimeout(resolve,100));const welcome=document.querySelector('[data-testid="bot-intro-welcome"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(welcome,'Xin chào kiểm thử');welcome.dispatchEvent(new Event('input',{bubbles:true}));await wait();document.querySelector('[data-testid="bot-intro-save"]').click();await wait();const original=window.confirm;window.confirm=()=>true;document.querySelector('[data-testid="bot-intro-start"]').click();window.confirm=original;for(let i=0;i<40;i++){await wait();if(document.querySelector('[data-testid="bot-intro-stats"]')?.textContent.includes('/start đã trả lời: 1')&&document.querySelector('[data-testid="bot-intro-stats"]')?.textContent.includes('Lựa chọn đã giải thích: 1'))return document.querySelector('[data-testid="bot-intro-state"]')?.textContent.includes('Đang lắng nghe')&&document.querySelector('[data-testid="bot-intro-preview"]')?.textContent.includes('Xin chào kiểm thử');}return false;})()`);
+     if(!running||Number(botReplies)!==2||policy.list('123456').length||methods.some(method=>['deleteWebhook','setWebhook'].includes(method)))throw Error('SMOKE_FAILED');
+     const stopped=await win.webContents.executeJavaScript(`(async()=>{const wait=()=>new Promise(resolve=>setTimeout(resolve,100));document.querySelector('[data-testid="bot-intro-stop"]').click();await wait();document.querySelector('[data-testid="bot-intro-restore"]').click();for(let i=0;i<30;i++){await wait();if(document.querySelector('[data-testid="bot-intro-state"]')?.textContent.includes('Đã kiểm tra'))break;}if(!document.querySelector('[data-testid="bot-intro-state"]')?.textContent.includes('Đã kiểm tra'))return false;const original=window.confirm;window.confirm=()=>true;document.querySelector('[data-testid="bot-intro-forget"]').click();window.confirm=original;for(let i=0;i<30;i++){await wait();if(document.querySelector('[data-testid="bot-intro-state"]')?.textContent==='Đã dừng')return true;}return false;})()`);
+     if(!stopped||await botVault.exists()||Number(botReplies)!==2||JSON.stringify(await userProbe.load())!==JSON.stringify({session:'user-session-kept'}))throw Error('SMOKE_FAILED');console.log('BOT_START_MENU_UI_PASS');console.log('BOT_TOKEN_DPAPI_ISOLATION_PASS');
+    }finally{botIntro.stop(true);botStore.close();botIntro=previousIntro;botStore=previousBotStore;botVault=previousBotVault;savedBotToken=previousSaved;await rm(directory,{recursive:true,force:true});}
+   }
+
    const inboxOk=await win.webContents.executeJavaScript(`(async()=>{
     document.querySelector('nav button[data-page="inbox"]').click();await new Promise(resolve=>setTimeout(resolve,150));
     if(!document.querySelector('[data-testid="inbox-disconnected"]')||!document.querySelector('[data-testid="inbox-refresh"]').disabled||typeof window.spike.inbox!=='function')return false;
@@ -432,4 +474,4 @@ else app.whenReady().then(async()=>{
  }
 }).catch(error=>{console.error('APP_START_FAILED',classifyError(error).code);if(!process.argv.includes('--smoke-test'))dialog.showErrorBox('Không thể mở ứng dụng',classifyError(error).message);app.exit(1);});
 app.on('window-all-closed',()=>app.quit());
-app.on('before-quit',()=>{clearInterval(queueTimer);void stopWorker(false,'QUEUE_APP_CLOSED');queue?.close();policy?.close();research?.close();});
+app.on('before-quit',()=>{botEpoch++;botIntro?.stop(true);botStore?.close();clearInterval(queueTimer);void stopWorker(false,'QUEUE_APP_CLOSED');queue?.close();policy?.close();research?.close();});

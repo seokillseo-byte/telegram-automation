@@ -246,3 +246,6 @@ Phục hồi crash/sleep/mất kết nối và màn review. QueueRunner vô hi�
 
 ### P5.5 · 0.13.0
 Consent marketing và suppression theo tài khoản + peer namespace; nguồn/lịch sử ghi nhận thủ công. Kiểm tra ở preview, sau mã hóa khi tạo lịch, sau giải mã và ngay trước gửi trong worker đọc DB chỉ đọc. Rút đồng ý hủy lịch marketing chưa chạy, suppression hủy mọi lịch tương ứng; lượt đã chuyển worker thành uncertain và không replay. Ghim purpose, không suy đồng ý từ hồ sơ nghiên cứu; bỏ chặn không tự khôi phục consent. DB schema 7 ngăn bản cũ bỏ qua kiểm tra. [Test và giới hạn](SEND_CONSENT_V0.13.md). Chưa nghiệm thu live toàn Phase 5. Tiếp theo P6.1 /start và lựa chọn đăng ký bot; không kế thừa quyền bot từ consent tài khoản người dùng.
+
+### P6.1 · 0.14.0
+Bot long polling trong app, kiểm tra token + webhook, xem/sửa lời chào và bật/dừng rõ ràng. /start riêng tư hiển thị ba lựa chọn; callback chỉ giải thích, không tạo subscriber/consent. Token bot có lựa chọn lưu DPAPI riêng phiên tài khoản, khôi phục không tự bật. Claim/offset bền vững và phản hồi muộn được chặn để không replay mù; chưa coi P6.5 hoàn tất. [Nghiệm thu và giới hạn](BOT_START_V0.14.md). DB schema 8, chưa nghiệm thu live bot. Tiếp theo P6.2 opt-in chủ đề, /stop và consent event riêng cho bot.
