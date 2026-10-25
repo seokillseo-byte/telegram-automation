@@ -77,3 +77,6 @@ Bước đầu Phase 5: xác nhận lịch từ preview, lưu SQLite với paylo
 
 ## Nhóm/kênh công khai · 0.16.0
 [Hướng dẫn và test](docs/PUBLIC_COMMUNITY_SEARCH_V0.16.md): Nghiên cứu ngành → Nhóm/kênh công khai · Tự lưu. Một lần tìm tự lọc trùng, lưu hồ sơ và chọn sẵn để xuất Excel. Có nút mở liên kết Telegram, dùng lại phân tích nhóm/kênh. Không tự gia nhập/quét thành viên/rẽ nhánh cá nhân. Nhánh `public-community-search-v0.16`; giữ schema 9. P6.3 chưa triển khai.
+
+## Chat và Automation · 0.17.0
+[Hướng dẫn và test](docs/TELEGRAM_CHAT_UI_V0.17.md): màn hình Tin nhắn hai cột theo bố cục Telegram, tự tải hội thoại sau kết nối, ô soạn tự theo người nhận đang mở; Automation quản lý lịch gửi hiện có. Dùng lại backend, schema 9. Avatar chữ và nhãn media; chưa tải ảnh/video lịch sử, chưa tự thêm liên hệ. Nhánh `telegram-chat-ui-v0.17`.
