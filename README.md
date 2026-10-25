@@ -80,3 +80,6 @@ Bước đầu Phase 5: xác nhận lịch từ preview, lưu SQLite với paylo
 
 ## Chat và Automation · 0.17.0
 [Hướng dẫn và test](docs/TELEGRAM_CHAT_UI_V0.17.md): màn hình Tin nhắn hai cột theo bố cục Telegram, tự tải hội thoại sau kết nối, ô soạn tự theo người nhận đang mở; Automation quản lý lịch gửi hiện có. Dùng lại backend, schema 9. Avatar chữ và nhãn media; chưa tải ảnh/video lịch sử, chưa tự thêm liên hệ. Nhánh `telegram-chat-ui-v0.17`.
+
+### Sửa nút gửi · 0.17.1
+[Hướng dẫn](docs/CHAT_SEND_FIX_V0.17.1.md): đổi Xem trước thành Gửi tin…; mở cửa sổ xác nhận riêng với nút Xác nhận gửi dễ thấy. Không đổi backend hoặc dữ liệu. Nhánh `chat-send-button-v0.17.1`.
