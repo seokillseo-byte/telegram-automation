@@ -347,8 +347,11 @@ else app.whenReady().then(async()=>{
    const fixtureStatus={state:'connected',userConnected:true,inboxOnline:true,userIdentity:{id:'1',name:'Kiểm thử',kind:'user' as const,peerType:'user' as const}};
    win.webContents.send('spike:status',fixtureStatus);
    await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,150))`);
-   const opened=await win.webContents.executeJavaScript(`(async()=>{document.querySelector('[data-testid="inbox-refresh"]').click();await new Promise(resolve=>setTimeout(resolve,200));document.querySelector('.dialog-row')?.click();await new Promise(resolve=>setTimeout(resolve,200));return document.querySelector('.inbox-message')?.textContent.includes('Tin ban đầu');})()`);
-   if(!opened)throw Error('SMOKE_FAILED');
+   const opened=await win.webContents.executeJavaScript(`(async()=>{for(let attempt=0;attempt<30&&!document.querySelector('.dialog-row');attempt++)await new Promise(resolve=>setTimeout(resolve,50));document.querySelector('.dialog-row')?.click();await new Promise(resolve=>setTimeout(resolve,200));return document.querySelector('.inbox-message')?.textContent.includes('Tin ban đầu');})()`);
+   if(!opened||fixtureReads!==2)throw Error('CHAT_AUTOLOAD_FAILED');console.log('CHAT_AUTOLOAD_ONCE_PASS');
+   const chatLayoutOk=await win.webContents.executeJavaScript(`(()=>{const layout=document.querySelector('[data-testid="telegram-chat-layout"]'),dialogs=document.querySelector('.chat-dialogs'),history=document.querySelector('.conversation-history'),composer=document.querySelector('.chat-composer');if(!layout||!dialogs||!history||!composer)return false;const left=dialogs.getBoundingClientRect(),right=history.getBoundingClientRect(),bottom=composer.getBoundingClientRect();return getComputedStyle(layout).display==='grid'&&left.right<=right.left+1&&bottom.top>=right.bottom-1&&document.querySelector('[data-testid="send-target"]').value==='dialog'&&document.querySelector('[data-testid="composer-recipient"]').textContent.includes('Hội thoại thử');})()`);
+   if(!chatLayoutOk)throw Error('CHAT_LAYOUT_FAILED');console.log('TELEGRAM_CHAT_LAYOUT_TARGET_PASS');
+
    const delta={type:'message',key:'user:1',edited:false,message:{id:6,at:'2026-10-24T00:00:01Z',text:'Tin trực tiếp',kind:'text',outgoing:false}};
    win.webContents.send('inbox:update',delta);win.webContents.send('inbox:update',delta);
    fixtureMessages=[{...fixtureMessages[0],id:6,text:'Đã sửa <script>'}];

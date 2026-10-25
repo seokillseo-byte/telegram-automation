@@ -256,3 +256,7 @@ Bot long polling trong app, kiểm tra token + webhook, xem/sửa lời chào v�
 ### Bổ sung theo yêu cầu: Nhóm/kênh công khai · 0.16.0
 
 P6 tạm dừng sau P6.2. Bổ sung chế độ tìm cộng đồng công khai, tự lọc/lưu/chọn kết quả để xuất Excel và mở liên kết nhóm/kênh. Tiêu chí nghiệm thu và test tại [PUBLIC_COMMUNITY_SEARCH_V0.16.md](PUBLIC_COMMUNITY_SEARCH_V0.16.md). Không triển khai quét thành viên, tự gia nhập hoặc mở rộng thu thập tài khoản cá nhân. Không bắt đầu P6.3 trong thay đổi này.
+
+### Điều chỉnh giao diện theo yêu cầu · 0.17.0
+
+Đặt Tin nhắn và Automation làm trung tâm theo ảnh người dùng gửi: bố cục chat hai cột, ô soạn dưới lịch sử, tự tải trang hội thoại đầu, người nhận theo hội thoại, quản lý lịch gửi thật từ Automation. Dùng lại module đã có, không mở rộng thu thập dữ liệu/P6.3/tự kết bạn trong thay đổi này. [Nghiệm thu và hướng dẫn test](TELEGRAM_CHAT_UI_V0.17.md).

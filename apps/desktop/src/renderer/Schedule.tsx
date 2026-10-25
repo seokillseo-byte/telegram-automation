@@ -3,7 +3,7 @@ import {useContext,useEffect,useRef,useState} from 'react';
 import {PreferencesContext,useDateFormatter} from './preferences';
 import {JOB_LABELS,localScheduleToUtc,queueRecoveryHelp,utcToScheduleLocal,type QueueAction,type QueueJob,type QueueReply} from '../../../../packages/shared/src/queue';
 type Success=Extract<QueueReply,{ok:true}>;
-export function Schedule({request,accountId}:{accountId?:string;request:(action:QueueAction)=>Promise<QueueReply>}){
+export function Schedule({request,accountId,onCompose}:{onCompose?:()=>void;accountId?:string;request:(action:QueueAction)=>Promise<QueueReply>}){
  const [jobs,setJobs]=useState<QueueJob[]>([]),[summary,setSummary]=useState({needsReview:0,uncertain:0});
  const [notice,setNotice]=useState(''),[working,setWorking]=useState(false),[reviewOnly,setReviewOnly]=useState(false);
  const [detail,setDetail]=useState<Success['detail']>(),[selected,setSelected]=useState<QueueJob>(),[when,setWhen]=useState('');
@@ -21,7 +21,7 @@ export function Schedule({request,accountId}:{accountId?:string;request:(action:
   const refresh=async()=>{if(locked.current)return;const version=sequence.current;try{const reply=await request({type:'list',reviewOnly});if(owner===epoch.current&&version===sequence.current&&reply.ok)apply(reply);}catch{/* manual refresh gives an actionable error */}};
   void refresh();const timer=setInterval(()=>void refresh(),3000);return ()=>{epoch.current++;clearInterval(timer);};
  },[request,accountId,reviewOnly]);
- return <><section><h2>Lịch gửi văn bản một lần</h2>
+ return <><section className="automation-heading"><span className="badge">AUTOMATION</span><h2>Quản lý gửi tin tự động</h2><p>Soạn tin trong cuộc trò chuyện, chọn giờ và xác nhận. Lịch đã lưu sẽ tự chạy khi ứng dụng mở và tài khoản kết nối.</p><button onClick={onCompose}>Tạo lịch từ Tin nhắn</button></section><section><h2>Lịch gửi văn bản một lần</h2>
   <p>Lịch chạy khi app mở, có mạng và đúng tài khoản đã kết nối. Nếu kết nối bị dừng trong lúc thực thi lịch, hãy Khôi phục phiên trong Tài khoản trước khi tiếp tục.</p>
   <p>Lịch lỡ giờ cần kiểm tra, không tự gửi bù. “Chưa rõ kết quả” không tự gửi lại; kiểm tra hội thoại Telegram trước khi tạo lịch khác. Lịch marketing cần đồng ý còn hiệu lực trước mỗi lần gửi; danh sách chặn áp dụng mọi mục đích. Chưa có lịch tệp hoặc reply.</p>
   <div data-testid="queue-recovery-summary" role="status"><strong>Cần kiểm tra: {summary.needsReview} lịch quá hạn/gián đoạn · {summary.uncertain} lịch chưa rõ kết quả.</strong><p>Các số đếm thuộc tài khoản đang xem, bao gồm bản ghi ngoài 200 dòng hiện tại.</p></div>
