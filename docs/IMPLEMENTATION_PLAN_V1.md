@@ -252,3 +252,7 @@ Bot long polling trong app, kiểm tra token + webhook, xem/sửa lời chào v�
 
 ### P6.2 · 0.15.0
 Đúng phạm vi: xác nhận riêng hai chủ đề đã có, /stop hủy mọi chủ đề và lưu consent event bot. Yêu cầu xác nhận dùng nonce một lần, TTL 5 phút, gắn bot/người dùng/chủ đề/tin đã gửi; /stop vô hiệu hóa nút cũ và ưu tiên local trước outbound. Có lịch sử chỉ đọc tại mục Bot, không thêm CRM/chiến dịch/thông báo P6.4. DB schema 9. [Tiêu chí và test](BOT_CONSENT_V0.15.md). Chưa nghiệm thu live P6.2; tiếp theo theo kế hoạch là P6.3, không triển khai trong bản này.
+
+### Bổ sung theo yêu cầu: Nhóm/kênh công khai · 0.16.0
+
+P6 tạm dừng sau P6.2. Bổ sung chế độ tìm cộng đồng công khai, tự lọc/lưu/chọn kết quả để xuất Excel và mở liên kết nhóm/kênh. Tiêu chí nghiệm thu và test tại [PUBLIC_COMMUNITY_SEARCH_V0.16.md](PUBLIC_COMMUNITY_SEARCH_V0.16.md). Không triển khai quét thành viên, tự gia nhập hoặc mở rộng thu thập tài khoản cá nhân. Không bắt đầu P6.3 trong thay đổi này.

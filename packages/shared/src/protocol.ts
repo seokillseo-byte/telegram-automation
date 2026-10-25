@@ -2,13 +2,13 @@ import {normalizeGroupTarget} from './group-analysis';
 export type Identity = {id:string; name:string; username?:string; kind:'user'|'bot'|'group'|'channel';peerType?:'user'|'chat'|'channel'};
 export type SearchPeer=Identity&{sources:('personalized'|'discovery'|'exact')[]};
 export type Failure = {code:string; message:string; retryAfter?:number};
-export type Status = {state:string; identity?:Identity; error?:Failure; groupReport?:import('./group-analysis').GroupReport; queryResults?:SearchPeer[]; researchResults?:import('./research').ResearchPeer[]; searchContext?:{query:string;exact:boolean}; userIdentity?:Identity; userConnected?:boolean; inboxOnline?:boolean; encryption?:boolean; stage?:string};
+export type Status = {state:string; identity?:Identity; error?:Failure; groupReport?:import('./group-analysis').GroupReport; queryResults?:SearchPeer[]; researchResults?:import('./research').ResearchPeer[]; searchContext?:{query:string;exact:boolean;mode?:import('./research').ResearchSearchMode}; userIdentity?:Identity; userConnected?:boolean; inboxOnline?:boolean; encryption?:boolean; stage?:string};
 export type Action =
  | {type:'login';apiId:number;apiHash:string;phone:string}
  | {type:'answer';value:string}
  | {type:'resume'} | {type:'logout'} | {type:'forget'}
  | {type:'bot';token:string}
- | {type:'search';query:string;exact:boolean}
+ | {type:'search';query:string;exact:boolean;mode?:import('./research').ResearchSearchMode}
  | {type:'analyzeGroup';target:string};
 export function parseAction(value:unknown):Action {
  if (!value || typeof value!=='object') throw Error('INPUT_INVALID');
@@ -20,7 +20,7 @@ export function parseAction(value:unknown):Action {
  case 'resume':case 'logout':case 'forget':return {type:v.type};
  case 'bot': {const token=str('token',256);if(!/^\d+:[A-Za-z0-9_-]+$/.test(token))throw Error('INPUT_INVALID');return {type:'bot',token};}
  case 'analyzeGroup':return {type:'analyzeGroup',target:normalizeGroupTarget(v.target)};
- case 'search': {const query=str('query',80).replace(/^@/,'');if(typeof v.exact!=='boolean'||query.length<3||/[\u0000-\u001f\u007f]/.test(query)||(v.exact&&!/^[a-zA-Z0-9_]{3,64}$/.test(query)))throw Error('INPUT_INVALID');return {type:'search',query,exact:v.exact};}
+ case 'search': {const query=str('query',80).replace(/^@/,'');if(typeof v.exact!=='boolean'||query.length<3||/[\u0000-\u001f\u007f]/.test(query)||(v.exact&&!/^[a-zA-Z0-9_]{3,64}$/.test(query)))throw Error('INPUT_INVALID');if(v.mode!==undefined&&v.mode!=='all'&&v.mode!=='public_groups')throw Error('INPUT_INVALID');if(v.mode==='public_groups'&&v.exact)throw Error('INPUT_INVALID');return {type:'search',query,exact:v.exact,...(v.mode?{mode:v.mode as import('./research').ResearchSearchMode}:{})};}
  default:throw Error('INPUT_INVALID');
  }
 }

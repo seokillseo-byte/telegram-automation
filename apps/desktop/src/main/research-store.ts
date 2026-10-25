@@ -4,7 +4,7 @@ import {DEFAULT_PREFERENCES,EVENT_LABELS,parsePreferences,type Preferences,type 
 import type {GroupReport} from '../../../../packages/shared/src/group-analysis';
 import {DatabaseSync} from 'node:sqlite';
 import type {SearchPeer} from '../../../../packages/shared/src/protocol';
-import {peerKey,type ResearchPeer,type ResearchRun,type ResearchSnapshot} from '../../../../packages/shared/src/research';
+import {publicCommunities,peerKey,type ResearchPeer,type ResearchRun,type ResearchSnapshot} from '../../../../packages/shared/src/research';
 export class ResearchStore{
  private db:DatabaseSync;
  constructor(file:string){
@@ -54,9 +54,9 @@ export class ResearchStore{
  private materialize(row:Record<string,unknown>):ResearchPeer{
   return {...JSON.parse(String(row.payload)),key:String(row.key),comparison:'seen',firstSeen:String(row.first_seen),lastSeen:String(row.last_seen),query:String(row.query),saved:Boolean(row.saved),note:String(row.note),tags:String(row.tags),category:String(row.category)};
  }
- record(account:string,query:string,exact:boolean,input:SearchPeer[],at=new Date().toISOString()):ResearchPeer[]{
+ record(account:string,query:string,exact:boolean,input:SearchPeer[],at=new Date().toISOString(),autoSaveCommunities=false):ResearchPeer[]{
   if(!/^\d+$/.test(account))throw Error('NOT_CONNECTED');
-  const peers=[...new Map(input.map(peer=>[peerKey(peer),peer])).values()];
+  const peers=[...new Map((autoSaveCommunities?publicCommunities(input):input).map(peer=>[peerKey(peer),peer])).values()];
   const results:ResearchPeer[]=[];
   this.db.exec('BEGIN IMMEDIATE');
   try{
@@ -67,6 +67,7 @@ export class ResearchStore{
     if(isPublic||old){
      this.db.prepare(`INSERT INTO research_entities(account,key,payload,first_seen,last_seen,query) VALUES(?,?,?,?,?,?) ON CONFLICT(account,key) DO UPDATE SET payload=excluded.payload,last_seen=excluded.last_seen,query=excluded.query`).run(account,key,JSON.stringify(peer),at,at,query);
     }
+    if(autoSaveCommunities)this.db.prepare('UPDATE research_entities SET saved=1 WHERE account=? AND key=?').run(account,key);
     const stored=isPublic?this.row(account,key):undefined;
     results.push({...peer,key,comparison:!isPublic?'not_public':!old?'new':changed?'changed':'seen',firstSeen:String(stored?.first_seen??at),lastSeen:at,query,note:String(stored?.note??''),tags:String(stored?.tags??''),category:String(stored?.category??''),saved:Boolean(stored?.saved)});
    }

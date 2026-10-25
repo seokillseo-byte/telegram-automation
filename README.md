@@ -74,3 +74,6 @@ Bước đầu Phase 5: xác nhận lịch từ preview, lưu SQLite với paylo
 
 ## P6.2 · Đồng ý theo chủ đề · 0.15.0
 [Hướng dẫn và test](docs/BOT_CONSENT_V0.15.md): chọn chủ đề rồi xác nhận, /stop hủy mọi chủ đề và vô hiệu hóa nút cũ; lịch sử đồng ý tại Tài khoản → Bot. Chỉ P6.2, chưa thêm CRM hoặc thông báo. Build nhánh `bot-consent-v0.15`; schema 9, không hạ về 0.14 hoặc cũ hơn.
+
+## Nhóm/kênh công khai · 0.16.0
+[Hướng dẫn và test](docs/PUBLIC_COMMUNITY_SEARCH_V0.16.md): Nghiên cứu ngành → Nhóm/kênh công khai · Tự lưu. Một lần tìm tự lọc trùng, lưu hồ sơ và chọn sẵn để xuất Excel. Có nút mở liên kết Telegram, dùng lại phân tích nhóm/kênh. Không tự gia nhập/quét thành viên/rẽ nhánh cá nhân. Nhánh `public-community-search-v0.16`; giữ schema 9. P6.3 chưa triển khai.
