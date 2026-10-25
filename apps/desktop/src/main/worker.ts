@@ -55,7 +55,7 @@ port.on('message',async (message)=>{
    }catch(error){port.postMessage({kind:'inbox',reply:{ok:false,error:classifyError(error)}});}
   } else if(message.type==='search'){
    if(!client||!await client.checkAuthorization())throw Error('NOT_CONNECTED');
-   stage=message.exact?'resolving_username':'searching_public';emit({state:'searching',stage});const results=await search(client,message.query,message.exact);emit({state:'search_complete',stage:'search_complete',queryResults:results,searchContext:{query:message.query,exact:message.exact}});
+   stage=message.exact?'resolving_username':'searching_public';emit({state:'searching',stage});const results=await search(client,message.query,message.exact);emit({state:'search_complete',stage:'search_complete',queryResults:results,searchContext:{query:message.query,exact:message.exact,mode:message.mode}});
   } else if(message.type==='analyzeGroup'){
    if(!client||!await client.checkAuthorization())throw Error('NOT_CONNECTED');
    const groupReport=await analyzeGroup(client,message.target,next=>{stage=next;emit({state:'analyzing_group',stage});});

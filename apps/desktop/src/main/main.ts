@@ -12,7 +12,7 @@ import {parseManualAction,type ManualReply,type SendPreview,type AttachmentData}
 import {readSendAttachment} from './send-attachment';
 import {parseInboxAction,type InboxReply} from '../../../../packages/shared/src/inbox';
 import {parseAppAction,type AppReply} from '../../../../packages/shared/src/app-state';
-import {app,BrowserWindow,ipcMain,safeStorage,dialog,powerMonitor} from 'electron';
+import {app,BrowserWindow,ipcMain,safeStorage,dialog,powerMonitor,shell} from 'electron';
 import {Worker} from 'node:worker_threads';
 import {join,basename} from 'node:path';
 import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
@@ -24,7 +24,7 @@ import {parseAnalysisAction,aggregateSample,type GroupReport,type AnalysisRespon
 import {groupWorkbook,exportGroupReports} from './group-export';
 import {ResearchStore} from './research-store';
 import {writeExport,toWorkbook} from './research-export';
-import {parseResearchAction,type ResearchPeer,type ResearchResponse} from '../../../../packages/shared/src/research';
+import {publicCommunityURL,parseResearchAction,type ResearchPeer,type ResearchResponse} from '../../../../packages/shared/src/research';
 import type {Identity} from '../../../../packages/shared/src/protocol';
 import {checkBot} from '../../../../packages/telegram-bot/src';
 let win:BrowserWindow;
@@ -96,7 +96,8 @@ function getWorker(){
    if(message.status.state==='search_complete'&&message.status.searchContext){
     try{
      const context=message.status.searchContext;
-     currentResults=research.record(researchScope,context.query,context.exact,message.status.queryResults??[]);
+     currentResults=research.record(researchScope,context.query,context.exact,message.status.queryResults??[],undefined,context.mode==='public_groups');
+     message.status.queryResults=currentResults;
      message.status.researchResults=currentResults;
     }catch{busy=false;emit({state:'error',stage:'saving_research',error:classifyError(Error('RESEARCH_ERROR'))});return;}
    }
@@ -236,6 +237,7 @@ else app.whenReady().then(async()=>{
    const action=parseResearchAction(input);
    if(action.type==='list')return {ok:true,snapshot:research.snapshot(researchScope)};
    if(!researchScope)throw Error('NOT_CONNECTED');
+   if(action.type==='openCommunity'){const peer=research.select(researchScope,[action.key],false)[0];await shell.openExternal(publicCommunityURL(peer));return {ok:true};}
    if(action.type==='save'){
     if(busy)throw Error('BUSY');
     const allowed=new Set(currentResults.filter(p=>p.username).map(p=>p.key));
@@ -313,11 +315,12 @@ else app.whenReady().then(async()=>{
      console.log('BOT_SMOKE_RUNNING_RESULT',Boolean(running),botReplies,botIntro.snapshot().state,botIntro.snapshot().config.welcome==='Xin chào kiểm thử',policy.list('123456').length,botIntro.snapshot().error?.code??'NONE');
      if(!running||Number(botReplies)!==2||policy.list('123456').length||methods.some(method=>['deleteWebhook','setWebhook'].includes(method)))throw Error('SMOKE_FAILED');
      const consentCallback=(id:number,data:string,messageId=77)=>({update_id:id,callback_query:{id:'consent-'+id,data,from:{id:42,is_bot:false},message:{message_id:messageId,date:now,chat:{id:42,type:'private'},from:{id:123456,is_bot:true}}}});
-     if(!releaseIntroPoll)throw Error('SMOKE_FAILED');releaseIntroPoll([consentCallback(3,'sub:topic:product:v2')]);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,350))`);
-     if(!confirmationData||botStore.consents.stats('123456').subscribers!==0||!releaseIntroPoll)throw Error('SMOKE_FAILED');releaseIntroPoll([consentCallback(4,confirmationData,79)]);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,350))`);
+     const waitIntro=async(predicate:()=>boolean)=>{for(let attempt=0;attempt<100;attempt++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,25));}throw Error('BOT_SMOKE_POLL_NOT_READY');};
+     await waitIntro(()=>Boolean(releaseIntroPoll));releaseIntroPoll!([consentCallback(3,'sub:topic:product:v2')]);await waitIntro(()=>Boolean(confirmationData&&releaseIntroPoll));
+     if(!confirmationData||botStore.consents.stats('123456').subscribers!==0||!releaseIntroPoll)throw Error('SMOKE_FAILED');releaseIntroPoll([consentCallback(4,confirmationData,79)]);await waitIntro(()=>Boolean(releaseIntroPoll)&&botStore.consents.active('123456','42','product'));
      const consentVisible=await win.webContents.executeJavaScript(`(async()=>{document.querySelector('[data-testid="bot-consent-history"]').click();await new Promise(resolve=>setTimeout(resolve,150));return document.querySelector('[data-testid="bot-consent-events"]')?.textContent.includes('Đồng ý')&&document.querySelector('[data-testid="bot-intro-stats"]')?.textContent.includes('Người đang đăng ký: 1');})()`);
-     if(!consentVisible||!botStore.consents.active('123456','42','product')||!releaseIntroPoll)throw Error('SMOKE_FAILED');releaseIntroPoll([{update_id:5,message:{message_id:5,date:now,text:'/stop',chat:{id:42,type:'private'},from:{id:42,is_bot:false},entities:[{type:'bot_command',offset:0,length:5}]}}]);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,350))`);
-     if(botStore.consents.active('123456','42','product')||!releaseIntroPoll)throw Error('SMOKE_FAILED');releaseIntroPoll([consentCallback(6,confirmationData,79)]);await win.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(resolve,350))`);
+     if(!consentVisible||!botStore.consents.active('123456','42','product')||!releaseIntroPoll)throw Error('SMOKE_FAILED');releaseIntroPoll([{update_id:5,message:{message_id:5,date:now,text:'/stop',chat:{id:42,type:'private'},from:{id:42,is_bot:false},entities:[{type:'bot_command',offset:0,length:5}]}}]);await waitIntro(()=>Boolean(releaseIntroPoll)&&!botStore.consents.active('123456','42','product'));
+     if(botStore.consents.active('123456','42','product')||!releaseIntroPoll)throw Error('SMOKE_FAILED');releaseIntroPoll([consentCallback(6,confirmationData,79)]);await waitIntro(()=>Boolean(releaseIntroPoll)&&Number(botReplies)===7);
      const optOutVisible=await win.webContents.executeJavaScript(`(async()=>{document.querySelector('[data-testid="bot-consent-history"]').click();await new Promise(resolve=>setTimeout(resolve,150));return document.querySelector('[data-testid="bot-consent-events"]')?.textContent.includes('bot:/stop')&&document.querySelector('[data-testid="bot-intro-stats"]')?.textContent.includes('Người đang đăng ký: 0');})()`);
      if(!optOutVisible||botStore.consents.active('123456','42','product')||botStore.consents.history('123456').length!==2||policy.list('123456').length)throw Error('SMOKE_FAILED');console.log('BOT_TOPIC_CONSENT_STOP_PASS');
 
@@ -478,6 +481,16 @@ else app.whenReady().then(async()=>{
     if(probeStore.preferences().timeZone!=='UTC'||!probeStore.appSnapshot('1').events.length)throw Error('RESEARCH_ERROR');console.log('PHASE1_SETTINGS_LOGS_PASS');
     const reports=probeStore.listGroupReports('1');if(reports.length!==1||reports[0].metrics.views.total!==5)throw Error('RESEARCH_ERROR');
     const analysisBook=await groupWorkbook(reports);if(analysisBook[0]!==80||analysisBook[1]!==75)throw Error('EXPORT_ERROR');
+    const communities=probeStore.record('1','research',false,[sample,sample,{...sample,id:'99',kind:'user'}],undefined,true);
+    const previousResearch=research,previousScope=researchScope;research=probeStore;researchScope='1';
+    try{
+     await win.webContents.executeJavaScript(`document.querySelector('nav [data-page="research"]').click()`);
+     await win.webContents.executeJavaScript(`(()=>{const mode=document.querySelector('[data-testid="research-mode"]');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(mode,'public_groups');mode.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+     emit({state:'search_complete',researchResults:communities,searchContext:{query:'research',exact:false,mode:'public_groups'}});
+     let ready=false;for(let attempt=0;attempt<40;attempt++){ready=await win.webContents.executeJavaScript(`(()=>{const mode=document.querySelector('[data-testid="research-mode"]');const row=[...document.querySelectorAll('tr')].find(r=>r.textContent.includes('@research_demo'));const excel=[...document.querySelectorAll('button')].find(b=>b.textContent==='Xuất Excel (.xlsx)');return mode?.value==='public_groups'&&row?.querySelector('input')?.checked&&excel&&!excel.disabled&&document.body.textContent.includes('Đã tự lọc trùng và lưu 1 nhóm/kênh công khai');})()`);if(ready)break;await new Promise(resolve=>setTimeout(resolve,25));}
+     if(!ready||communities.length!==1||!communities[0].saved)throw Error('RESEARCH_ERROR');
+     console.log('PUBLIC_COMMUNITY_AUTOSAVE_UI_PASS');
+    }finally{research=previousResearch;researchScope=previousScope;}
     probeStore.close();console.log('GROUP_ANALYSIS_SQLITE_XLSX_PASS');console.log('RESEARCH_SQLITE_XLSX_PASS');
    }finally{await rm(researchDir,{recursive:true,force:true});}
    console.log('PHASE0_SMOKE_PASS');app.exit(0);

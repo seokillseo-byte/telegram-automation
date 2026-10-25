@@ -82,3 +82,33 @@ test('one manual search requests 100 and renders every returned peer without ext
  const results=await search(fake as never,'research',false);
  assert.equal(calls,1);assert.equal(results.length,100);assert.ok(results.every(p=>p.sources.includes('discovery')));
 });
+
+test('public community mode autosaves atomically, excludes people/private groups, preserves notes and isolates accounts',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'community-test-'));const file=join(dir,'test.sqlite');let db=new ResearchStore(file);
+ try{
+  const mixed:SearchPeer[]=[peer,peer,{...peer,id:'20',kind:'user'},{...peer,id:'21',kind:'bot'},{...peer,id:'22',kind:'group',username:undefined},{...peer,id:'23',kind:'group',username:'bad/path'},{...peer,id:'24',kind:'group',username:'seo_group'}];
+  const first=db.record('1','seo',false,mixed,undefined,true);
+  assert.equal(first.length,2);assert.ok(first.every(p=>p.saved&&p.comparison==='new'));
+  assert.equal(db.snapshot('1').totalSaved,2);assert.equal(db.snapshot('1').runs[0].returned,2);
+  db.note('1',first[0].key,'Ghi chú giữ lại','SEO','Nghiên cứu');
+  const second=db.record('1','seo',false,mixed,undefined,true);
+  assert.ok(second.every(p=>p.comparison==='seen'));assert.equal(db.snapshot('1').totalSaved,2);
+  assert.equal(second[0].note,'Ghi chú giữ lại');assert.equal(db.snapshot('2').totalSaved,0);
+  db.record('2','seo',false,mixed);assert.equal(db.snapshot('2').totalSaved,0);
+  db.close();db=new ResearchStore(file);assert.equal(db.snapshot('1').totalSaved,2);
+  assert.equal(db.snapshot('1').records.find(p=>p.key===first[0].key)?.note,'Ghi chú giữ lại');
+  assert.equal(db.record('1','nothing',false,[],undefined,true).length,0);assert.equal(db.snapshot('1').totalSaved,2);
+ }finally{db.close();await rm(dir,{recursive:true,force:true});}
+});
+
+test('community mode IPC is explicit and external links are constructed only from valid public communities',async()=>{
+ const {parseAction}=await import('../packages/shared/src/protocol');
+ const {publicCommunityURL}=await import('../packages/shared/src/research');
+ assert.equal((parseAction({type:'search',query:'seo',exact:false,mode:'public_groups'}) as {mode:string}).mode,'public_groups');
+ assert.throws(()=>parseAction({type:'search',query:'seo',exact:true,mode:'public_groups'}));
+ assert.throws(()=>parseAction({type:'search',query:'seo',exact:false,mode:'crawl'}));
+ assert.equal(publicCommunityURL(peer),'https://t.me/seo_test');
+ assert.throws(()=>publicCommunityURL({...peer,kind:'user'}));
+ assert.throws(()=>publicCommunityURL({...peer,username:'evil.com/path'}));
+ assert.throws(()=>parseResearchAction({type:'openCommunity',key:'https://evil.invalid'}));
+});
